@@ -1,0 +1,7 @@
+fastapi>=0.100.0
+uvicorn>=0.22.0
+livekit-api>=0.4.0
+python-dotenv>=1.0.0
+
+# Phase 3 Dependencies
+supabase>=2.0.0         # Supabase Python client for PostgreSQL

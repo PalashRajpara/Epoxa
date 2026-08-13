@@ -1,0 +1,20 @@
+livekit-agents<1.0
+livekit<1.0
+livekit-api<1.0
+livekit-protocol<1.0
+livekit-plugins-openai<1.0
+livekit-plugins-deepgram<1.0
+livekit-plugins-cartesia<1.0
+livekit-plugins-silero<1.0
+python-dotenv>=1.0.0
+
+# Phase 2 Dependencies
+langgraph>=0.1.0
+langchain-core>=0.2.0
+langchain-openai>=0.1.0
+chromadb>=0.4.0
+sentence-transformers>=2.2.0
+httpx>=0.24.0
+
+# Phase 3 Dependencies
+supabase>=2.0.0         # Supabase Python client for saving call sessions/transcripts
