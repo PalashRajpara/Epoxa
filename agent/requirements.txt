@@ -5,7 +5,7 @@ livekit-protocol<1.0
 livekit-plugins-openai<1.0
 livekit-plugins-deepgram<1.0
 livekit-plugins-cartesia<1.0
-livekit-plugins-silero<1.0
+livekit-plugins-silero<2.0
 python-dotenv>=1.0.0
 
 # Phase 2 Dependencies
