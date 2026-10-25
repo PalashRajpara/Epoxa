@@ -1,0 +1,11 @@
+{
+  "name": "@epoxa/ui-tokens",
+  "version": "1.0.0",
+  "description": "Shared CSS Design Tokens and Glassmorphism Foundations for Epoxa",
+  "main": "tokens.css",
+  "style": "tokens.css",
+  "files": [
+    "tokens.css"
+  ],
+  "private": true
+}

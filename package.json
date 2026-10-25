@@ -1,0 +1,8 @@
+{
+  "name": "voice-ai-agent-workspace",
+  "private": true,
+  "description": "Voice AI Agent Monorepo",
+  "scripts": {
+    "dev": "pnpm --parallel --filter \"*\" dev"
+  }
+}

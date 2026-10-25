@@ -13,7 +13,10 @@ cd "$PROJECT_ROOT"
 
 # Check if tmux is installed for single-window session management
 if command -v tmux &> /dev/null; then
-    echo "Creating tmux session 'voice-ai' with all services..."
+    # Kill any existing session to avoid duplicate windows/ports
+    tmux kill-session -t voice-ai 2>/dev/null
+    
+    echo "Creating fresh tmux session 'voice-ai' with all services..."
     tmux new-session -d -s voice-ai -n 'Backend' "cd '$PROJECT_ROOT' && backend/venv/bin/python backend/main.py"
     tmux new-window -t voice-ai -n 'Agent' "cd '$PROJECT_ROOT/agent' && ../agent/venv/bin/python main.py dev"
     tmux new-window -t voice-ai -n 'Frontend' "cd '$PROJECT_ROOT/frontend' && npm start"

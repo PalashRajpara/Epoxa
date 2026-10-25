@@ -25,6 +25,7 @@ NOTE ON DATABASE:
 """
 
 import asyncio
+import json
 import logging
 import os
 import sys
@@ -380,8 +381,10 @@ async def entrypoint(ctx: JobContext):
         llm=llm_plugin,
         tts=tts_plugin,
         chat_ctx=initial_ctx,
-        preemptive_synthesis=True,
-        min_endpointing_delay=0.5
+        interrupt_speech_duration=0.7,
+        interrupt_min_words=2,
+        min_endpointing_delay=0.6,
+        preemptive_synthesis=False
     )
 
     # =========================================================================
@@ -401,7 +404,7 @@ async def entrypoint(ctx: JobContext):
         We save this to call_transcripts in Supabase.
         """
         # Get the text content of what was said
-        text = msg.content if isinstance(msg.content, str) else ""
+        text = msg.content if isinstance(msg.content, str) else " ".join([str(c) for c in msg.content]) if isinstance(msg.content, list) else str(msg.content or "")
         if not text.strip():
             return  # Skip empty messages
 
@@ -411,10 +414,10 @@ async def entrypoint(ctx: JobContext):
         # Update last activity time (resets session timeout countdown)
         last_activity_time[0] = datetime.now(timezone.utc)
 
+        print(f"\n🎙️ [CUSTOMER #{message_sequence[0]}]: {text}", flush=True)
         logger.info(f"[Transcript] USER (#{message_sequence[0]}): {text[:80]}")
 
-        # Save to Supabase (in a background task so it doesn't block the call)
-        # asyncio.ensure_future() schedules the coroutine to run without waiting for it
+        # Save to database in a background task
         asyncio.ensure_future(
             _save_transcript_async(session_id, "user", text, message_sequence[0])
         )
@@ -423,14 +426,13 @@ async def entrypoint(ctx: JobContext):
     def on_agent_speech_committed(msg: llm.ChatMessage):
         """
         Called every time the agent finishes speaking a complete utterance.
-
-        We save this to call_transcripts in Supabase.
         """
-        text = msg.content if isinstance(msg.content, str) else ""
+        text = msg.content if isinstance(msg.content, str) else " ".join([str(c) for c in msg.content]) if isinstance(msg.content, list) else str(msg.content or "")
         if not text.strip():
             return
 
         message_sequence[0] += 1
+        print(f"🤖 [EPIXA AI #{message_sequence[0]}]: {text}", flush=True)
         logger.info(f"[Transcript] AGENT (#{message_sequence[0]}): {text[:80]}")
 
         asyncio.ensure_future(
@@ -440,12 +442,11 @@ async def entrypoint(ctx: JobContext):
     # =========================================================================
     # EVENT LISTENERS — LATENCY TRACKING (Phase 3)
     # =========================================================================
-    # These events fire at the start and end of each pipeline stage.
-    # We use them to precisely time how long each step takes.
 
     @agent.on("user_started_speaking")
     def on_user_started_speaking():
         """User began speaking — start timing STT (we're about to transcribe their voice)."""
+        print("🎙️ [VAD] Customer voice detected...", flush=True)
         logger.info("🎙️ [Event] User started speaking...")
         # Reset the tracker for a new turn
         latency_tracker.reset()

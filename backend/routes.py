@@ -1,11 +1,12 @@
 import os
+import re
 import uuid
 import logging
 import asyncio
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Optional, List
 from fastapi import APIRouter, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from livekit import api
 
 # Flat imports from the same directory level
@@ -35,6 +36,32 @@ class TokenRequest(BaseModel):
     participant_name: str
     role: Optional[str] = "customer"  # "customer" or "agent"
 
+    @field_validator('room_name')
+    @classmethod
+    def validate_room_name(cls, v):
+        v = v.strip()
+        if not v or len(v) < 3 or len(v) > 128:
+            raise ValueError('room_name must be between 3 and 128 characters')
+        if not re.match(r'^[a-zA-Z0-9_\-]+$', v):
+            raise ValueError('room_name may only contain alphanumeric characters, hyphens, and underscores')
+        return v
+
+    @field_validator('participant_name')
+    @classmethod
+    def validate_participant_name(cls, v):
+        v = v.strip()
+        if not v or len(v) > 100:
+            raise ValueError('participant_name must be between 1 and 100 characters')
+        return v
+
+    @field_validator('role')
+    @classmethod
+    def validate_role(cls, v):
+        allowed = ['customer', 'agent']
+        if v not in allowed:
+            raise ValueError(f'role must be one of: {allowed}')
+        return v
+
 @router.post("/api/token")
 async def generate_token(request: TokenRequest):
     """
@@ -53,10 +80,13 @@ async def generate_token(request: TokenRequest):
     unique_identity = f"{prefix}_{uuid.uuid4().hex[:8]}"
     
     try:
+        # Set explicit TTL: 10 minutes for customers, 2 hours for agents
+        ttl = timedelta(seconds=600) if request.role == "customer" else timedelta(seconds=7200)
         token = (
             api.AccessToken(api_key=api_key, api_secret=api_secret)
             .with_identity(unique_identity)
             .with_name(request.participant_name)
+            .with_ttl(ttl)
             .with_grants(
                 api.VideoGrants(
                     room_join=True,
@@ -72,9 +102,10 @@ async def generate_token(request: TokenRequest):
             "server_url": os.getenv("LIVEKIT_URL")
         }
     except Exception as e:
+        logger.error(f"Token generation failed: {e}")
         raise HTTPException(
             status_code=500,
-            detail=f"An error occurred while generating the token: {str(e)}"
+            detail="An internal error occurred while generating the access token."
         )
 
 
@@ -122,9 +153,10 @@ async def list_rooms():
     except HTTPException:
         raise
     except Exception as e:
+        logger.error(f"Failed to fetch active rooms: {e}")
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to fetch active rooms from LiveKit: {str(e)}"
+            detail="Failed to fetch active rooms from LiveKit."
         )
 
 
@@ -154,9 +186,10 @@ async def create_room(request: CreateRoomRequest):
     except HTTPException:
         raise
     except Exception as e:
+        logger.error(f"Failed to create room: {e}")
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to create room: {str(e)}"
+            detail="Failed to create room on the LiveKit server."
         )
 
 
@@ -195,7 +228,19 @@ async def list_active_sessions():
             status = session.get("status")
             
             if status in ("active", "escalated"):
-                if active_room_names is not None and room_name not in active_room_names:
+                # BUG-15 FIX: Add 60s grace period to avoid marking newly-connecting sessions as stale
+                session_age_ok = True
+                try:
+                    started_str = session.get("started_at", "")
+                    if started_str:
+                        started_check = started_str.replace("Z", "+00:00")
+                        started_dt_check = datetime.fromisoformat(started_check)
+                        age_seconds = (datetime.now(timezone.utc) - started_dt_check).total_seconds()
+                        if age_seconds < 60:
+                            session_age_ok = False
+                except Exception:
+                    pass
+                if active_room_names is not None and room_name not in active_room_names and session_age_ok:
                     logger.info(f"Session {session_id[:8]} is stale. Auto-healing to 'completed'.")
                     session["status"] = "completed"
                     
@@ -278,6 +323,30 @@ class CustomerCreate(BaseModel):
     phone: str
     email: str
 
+    @field_validator('name')
+    @classmethod
+    def validate_name(cls, v):
+        v = v.strip()
+        if not v or len(v) > 200:
+            raise ValueError('name must be between 1 and 200 characters')
+        return v
+
+    @field_validator('phone')
+    @classmethod
+    def validate_phone(cls, v):
+        digits = re.sub(r'\D', '', v)
+        if len(digits) < 10 or len(digits) > 15:
+            raise ValueError('phone must contain between 10 and 15 digits')
+        return v
+
+    @field_validator('email')
+    @classmethod
+    def validate_email(cls, v):
+        v = v.strip()
+        if not re.match(r'^[^@\s]+@[^@\s]+\.[^@\s]+$', v):
+            raise ValueError('email must be a valid email address')
+        return v
+
 @router.post("/api/customers")
 def register_customer(customer: CustomerCreate):
     """
@@ -345,9 +414,10 @@ def create_ticket(request: CreateTicketRequest):
             "ticket_id": ticket_id
         }
     except Exception as e:
+        logger.error(f"Failed to record support ticket: {e}")
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to record support ticket: {str(e)}"
+            detail="Failed to record support ticket."
         )
 
 

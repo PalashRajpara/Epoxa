@@ -1,145 +1,110 @@
-# AI Voice Agent
+# Epoxa: Production Voice AI Agent Platform
 
-Welcome to your **AI Voice Agent** application! This project establishes a real-time voice conversation between a user (via a React web app), an admin dashboard, and an AI voice agent (running on LiveKit Python SDK), backed by FastAPI for secure token exchange and Supabase for persistence.
+> Enterprise real-time Voice AI agent platform for customer support, automated appointment booking, grievance registration, and supervisor live takeover.
 
 ---
 
-## 📁 Project File Structure
+## 🚀 Quickstart (Under 10 Minutes)
 
-Here are the files created and configured:
+### Option 1: Docker Compose (Recommended)
+Launch the entire system (PostgreSQL with pgvector, FastAPI, Agent worker, Web client, and Supervisor Dashboard) with one command:
+
+```bash
+# 1. Clone the repository and configure environment
+cp .env.example .env
+# Edit .env with your LiveKit, Deepgram, and Groq credentials
+
+# 2. Launch all services
+docker compose -f infra/docker/compose.dev.yml up --build
 ```
-ai-voice-agent/
-├── README.md
-├── .env.example
-├── .env
-├── .gitignore
-│
-├── backend/                            # FastAPI backend
-│   ├── main.py
-│   ├── requirements.txt
-│   └── routes/
-│       ├── token.py
-│       └── rooms.py
-│
-├── agent/                              # LiveKit Python Voice Agent
-│   ├── main.py
-│   ├── requirements.txt
-│   └── config/
-│       └── settings.py
-│
-└── frontend/                           # React customer-facing UI
-    ├── package.json
-    ├── public/
-    │   └── index.html
-    └── src/
-        ├── App.jsx
-        ├── index.js
-        ├── components/
-        │   ├── JoinRoom.jsx
-        │   ├── CallScreen.jsx
-        │   └── MicButton.jsx
-        └── utils/
-            └── livekit_client.js
+- **Customer Web App:** [http://localhost:3000](http://localhost:3000)
+- **Supervisor Dashboard:** [http://localhost:3001](http://localhost:3001)
+- **FastAPI Documentation:** [http://localhost:8000/docs](http://localhost:8000/docs)
+
+---
+
+### Option 2: Local Development Workflow
+
+#### Prerequisites
+- **Python 3.12+** and [`uv`](https://docs.astral.sh/uv/)
+- **Node.js 20+** and `pnpm` (`corepack enable pnpm`)
+- **Docker** (for local PostgreSQL with pgvector)
+
+```bash
+# 1. Install dependencies
+uv sync
+pnpm install
+
+# 2. Start PostgreSQL container
+docker run -d --name epoxa-postgres -p 5432:5432 \
+  -e POSTGRES_DB=epoxa_dev \
+  -e POSTGRES_PASSWORD=postgrespassword \
+  pgvector/pgvector:pg16
+
+# 3. Run database migrations & seed initial organization
+make migrate
+make seed
+
+# 4. Start services (each in separate terminal or background)
+# Terminal 1: FastAPI API Service
+uv run uvicorn epoxa_api.main:app --port 8000 --reload
+
+# Terminal 2: LiveKit Voice Agent Worker
+uv run python -m epoxa_agent.main start
+
+# Terminal 3: Customer Web App
+pnpm --filter epoxa-web dev
+
+# Terminal 4: Supervisor Console
+pnpm --filter epoxa-dashboard dev
 ```
 
 ---
 
-## 🔑 Required API Keys & Where to Get Them (Free Tiers)
+## 📁 Monorepo Layout
 
-To run the voice assistant, replace the placeholders in your root `.env` file with real API keys:
-
-1. **LiveKit Cloud Credentials**:
-   * Go to [LiveKit Cloud](https://cloud.livekit.io/) and sign up for a free account.
-   * Create a new project.
-   * Go to **Settings > Keys** to generate a new key pair.
-   * Copy the **Project URL** (`wss://...`), **API Key**, and **API Secret**.
-
-2. **Groq API Key** (LLM brain):
-   * Sign up at [Groq Console](https://console.groq.com/).
-   * Navigate to **API Keys** and generate a new key.
-   * Groq provides a free tier with high rate limits for models like `llama3-8b`.
-
-3. **Deepgram API Key** (Speech-to-Text):
-   * Sign up at [Deepgram Console](https://console.deepgram.com/).
-   * Create a new project (includes $200 free credit on signup, which lasts a long time).
-   * Generate an **API Key** with at least `Member` role permissions.
-
-4. **Cartesia API Key** (Text-to-Speech voice synthesis):
-   * Sign up at [Cartesia Play](https://play.cartesia.ai/).
-   * Click on your profile and generate a new **API Key** (includes free initial credits).
-
----
-
-## ⚙️ Step-by-Step Installation & Run Instructions
-
-For beginners, keep the backend and the agent in separate Python virtual environments to prevent package dependency conflicts. You will need **3 terminal windows** open.
-
-### Terminal 1: FastAPI Backend
-1. Navigate to the project folder.
-2. Create and activate a Python virtual environment:
-   ```bash
-   # On macOS/Linux:
-   python3 -m venv backend/venv
-   source backend/venv/bin/activate
-   ```
-3. Install backend dependencies:
-   ```bash
-   pip install -r backend/requirements.txt
-   ```
-4. Run the FastAPI development server:
-   ```bash
-   python backend/main.py
-   ```
-   *The backend will start on **`http://localhost:8000`**.*
+```
+epoxa/
+├── apps/
+│   ├── api/                  # FastAPI REST & SSE service (epoxa_api)
+│   ├── agent/                # LiveKit voice worker & LangGraph (epoxa_agent)
+│   ├── web/                  # Customer voice client (Vite + React 18 + TS)
+│   └── dashboard/            # Supervisor operations console (Vite + React 18 + TS)
+├── packages/
+│   ├── core/                 # Shared domain models, repos, services (epoxa_core)
+│   ├── api-client/           # Typed TS client generated from OpenAPI (@epoxa/api-client)
+│   └── ui-tokens/            # Shared glassmorphism CSS design tokens (@epoxa/ui-tokens)
+├── db/
+│   ├── alembic.ini
+│   ├── migrations/           # Alembic versioned migrations
+│   └── seeds/                # Idempotent seed scripts (Epoxcel org, admin, FAQ docs)
+├── infra/
+│   ├── docker/               # Multi-stage non-root Dockerfiles + compose.dev.yml
+│   └── scripts/              # Automation and deployment helpers
+├── docs/                     # Architecture, ADRs, database, security, and runbooks
+├── pyproject.toml            # Root uv workspace configuration
+├── pnpm-workspace.yaml       # Root pnpm workspace configuration
+└── Makefile                  # Development commands (dev, test, lint, migrate, seed)
+```
 
 ---
 
-### Terminal 2: LiveKit Voice Agent
-1. Navigate to the project folder.
-2. Create and activate a separate virtual environment:
-   ```bash
-   # On macOS/Linux:
-   python3 -m venv agent/venv
-   source agent/venv/bin/activate
-   ```
-3. Install agent dependencies:
-   ```bash
-   pip install -r agent/requirements.txt
-   ```
-4. Start the voice agent in development mode:
-   ```bash
-   cd agent
-   python main.py dev
-   ```
-   *The agent worker will connect to your LiveKit Cloud project and wait for dispatch jobs.*
+## 🛠️ Developer Commands
+
+| Command | Description |
+| :--- | :--- |
+| `make lint` | Run `ruff` linter and `mypy --strict` type checker |
+| `make format` | Format code automatically using `ruff format` |
+| `make test` | Execute automated test suite across all workspace packages |
+| `make migrate` | Apply latest Alembic database migrations to PostgreSQL |
+| `make seed` | Seed Epoxcel tenant organization, admin, and FAQ vectors |
+| `make gen-client` | Export OpenAPI schema and regenerate TypeScript client |
 
 ---
 
-### Terminal 3: React Frontend
-1. Navigate to the `frontend/` directory:
-   ```bash
-   cd frontend
-   ```
-2. Install npm dependencies:
-   ```bash
-   npm install
-   ```
-3. Start the React app:
-   ```bash
-   npm start
-   ```
-   *The browser will open automatically to **`http://localhost:3000`**.*
+## 🛡️ Security & Invariants
+- **Row Level Security (RLS)** is enabled and forced across all 12 database tables.
+- **Least-Privilege Roles**: Services connect via `epoxa_api` and `epoxa_agent` roles with minimum necessary grants.
+- **Voice Invariants**: Audio track isolation (`agent_*` and `human_*`), non-blocking `room.sid`, word-boundary escalation regex, and calibrated voice pipeline timings (`interrupt=0.7s`, `endpointing=0.6s`).
 
----
-
-## 🎙️ Testing your Voice Agent
-
-1. Open `http://localhost:3000` in your web browser.
-2. Enter your name (e.g., "Alice") and a support channel room name (e.g., "customer-support").
-3. Click **Connect to Agent**.
-4. Allow browser microphone permissions when prompted.
-5. Once connected:
-   * The visualizer orb will breathe slowly in **blue/violet** (listening state).
-   * You will hear the agent speak a greeting: *"Hello, thank you for calling. How can I help you today?"*
-   * While the agent speaks, the orb will glow **purple/pink** and pulse outward.
-   * Speak into your microphone, and hear the voice agent reply in real-time!
+For more details, see [docs/architecture/overview.md](file:///Users/palashrajpara/Developer/AI/voice-ai-agent/docs/architecture/overview.md) and [SECURITY.md](file:///Users/palashrajpara/Developer/AI/voice-ai-agent/SECURITY.md).

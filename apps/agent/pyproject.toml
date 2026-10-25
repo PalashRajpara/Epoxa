@@ -1,0 +1,35 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "epoxa-agent"
+version = "1.0.0"
+description = "Epoxa Real-Time Voice Agent Worker (LiveKit + LangGraph)"
+requires-python = ">=3.12"
+dependencies = [
+    "epoxa-core",
+    "livekit-agents<1.0",
+    "livekit<1.0",
+    "livekit-api<1.0",
+    "livekit-protocol<1.0",
+    "livekit-plugins-openai<1.0",
+    "livekit-plugins-deepgram<1.0",
+    "livekit-plugins-cartesia<1.0",
+    "livekit-plugins-silero<1.0",
+    "langgraph>=0.1.0",
+    "langchain-core>=0.2.0",
+    "langchain-openai>=0.1.0",
+    "sentence-transformers>=2.2.0",
+    "pgvector>=0.2.5",
+    "structlog>=24.1.0",
+    "pydantic>=2.7.0",
+    "pydantic-settings>=2.2.0",
+    "httpx>=0.27.0",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/epoxa_agent"]
+
+[tool.uv.sources]
+epoxa-core = { workspace = true }

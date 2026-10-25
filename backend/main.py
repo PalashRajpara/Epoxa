@@ -43,12 +43,12 @@ app = FastAPI(
 )
 
 # 6. Configure Cross-Origin Resource Sharing (CORS)
-# This allows our React frontend (typically running on http://localhost:3000)
-# to communicate with our FastAPI server (running on http://localhost:8000).
-# In production, replace "*" with your actual frontend domain.
+cors_origins_str = os.getenv("CORS_ORIGINS", "http://localhost:3000,http://localhost:3001,http://localhost:3002,http://localhost:5173")
+cors_origins = [origin.strip() for origin in cors_origins_str.split(",") if origin.strip()]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],   # For local development. Restrict in production.
+    allow_origins=cors_origins,
+    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+|0\.0\.0\.0)(:\d+)?$",
     allow_credentials=True,
     allow_methods=["*"],   # Allow all HTTP verbs (GET, POST, etc.)
     allow_headers=["*"],   # Allow all request headers

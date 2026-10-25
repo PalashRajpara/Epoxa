@@ -46,9 +46,13 @@ def router_node(state: AgentState) -> dict:
     
     # 1. Fast path check for escalation (explicit customer keywords)
     # This prevents running the LLM classifier if they just ask for a human
+    # Uses word-boundary regex to avoid false-positives like "superhuman" or
+    # "I don't want a human" where the keyword appears but intent is different.
     if messages:
         user_message = messages[-1].content.lower()
-        if any(kw in user_message for kw in ["human", "representative", "agent", "supervisor", "manager", "handover", "transfer"]):
+        import re
+        escalation_pattern = r'\b(speak\s+to\s+a?\s*human|talk\s+to\s+a?\s*human|transfer\s+me|speak\s+to\s+a?\s*(representative|agent|supervisor|manager)|handover|hand\s+me\s+over|connect\s+me\s+to\s+a?\s*human|i\s+want\s+a?\s*(human|representative|agent|supervisor|manager))\b'
+        if re.search(escalation_pattern, user_message):
             return {"current_flow": "escalation"}
             
     # 2. Check if we have an ongoing active flow.
@@ -82,31 +86,37 @@ def router_node(state: AgentState) -> dict:
     # 3. If idle, classify intent to route to the correct flow
     intent = "chat"
     if messages:
-        user_message = messages[-1].content
+        user_msg_obj = messages[-1]
+        user_message = user_msg_obj.content if isinstance(user_msg_obj.content, str) else str(user_msg_obj.content or "")
         intent = classify_intent(user_message)
         logger.info(f"Classified customer intent: {intent}")
         if intent == "escalate":
+            print(f"🎯 [ROUTER]: Intent='escalate' -> routing to ESCALATION", flush=True)
             return {"current_flow": "escalation"}
             
     # 4. Route based on intent and verification requirements
     if intent == "appointment":
         if state.get("customer_verified"):
+            print(f"🎯 [ROUTER]: Intent='appointment' (Verified) -> routing to BOOKING", flush=True)
             return {"current_flow": "booking"}
         else:
-            # Re-route to verify, but remember target flow is appointment (booking)
+            print(f"🎯 [ROUTER]: Intent='appointment' (Unverified) -> routing to VERIFY", flush=True)
             return {"target_flow": "booking", "current_flow": "verify"}
             
     elif intent == "complaint":
         if state.get("customer_verified"):
+            print(f"🎯 [ROUTER]: Intent='complaint' (Verified) -> routing to COMPLAINT", flush=True)
             return {"current_flow": "complaint"}
         else:
-            # Re-route to verify, but remember target flow is complaint
+            print(f"🎯 [ROUTER]: Intent='complaint' (Unverified) -> routing to VERIFY", flush=True)
             return {"target_flow": "complaint", "current_flow": "verify"}
             
     elif intent == "faq":
+        print(f"🎯 [ROUTER]: Intent='faq' -> routing to FAQ (ChromaDB RAG)", flush=True)
         return {"current_flow": "faq"}
         
     # Default to chat
+    print(f"🎯 [ROUTER]: Intent='chat' -> routing to GENERAL CHAT", flush=True)
     return {"current_flow": "chat"}
 
 
@@ -243,16 +253,24 @@ class LangGraphStream(llm.LLMStream):
                 logger.info(f"[GraphStream] Handoff active for session {self._llm.thread_id[:8]}. Muting AI response.")
                 return
 
-            # 1. Map LiveKit chat context to LangChain messages
+            # 1. Map LiveKit chat context to LangChain messages safely
             from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
             lc_messages = []
             for msg in self._chat_ctx.messages:
+                content_str = msg.content if isinstance(msg.content, str) else " ".join([str(c) for c in msg.content]) if isinstance(msg.content, list) else str(msg.content or "")
+                if not content_str.strip():
+                    continue
                 if msg.role == "system":
-                    lc_messages.append(SystemMessage(content=msg.content))
+                    lc_messages.append(SystemMessage(content=content_str))
                 elif msg.role == "user":
-                    lc_messages.append(HumanMessage(content=msg.content))
+                    lc_messages.append(HumanMessage(content=content_str))
                 elif msg.role == "assistant":
-                    lc_messages.append(AIMessage(content=msg.content))
+                    lc_messages.append(AIMessage(content=content_str))
+
+            # Print latest user input directly to terminal
+            last_human = next((m.content for m in reversed(lc_messages) if isinstance(m, HumanMessage)), "")
+            if last_human:
+                print(f"\n🎙️ [USER SPOKE]: \"{last_human}\"", flush=True)
 
             # 2. Run the graph state machine with dynamic checkpointer thread_id
             config = {"configurable": {"thread_id": self._llm.thread_id}}
@@ -262,19 +280,13 @@ class LangGraphStream(llm.LLMStream):
             messages = result.get("messages", [])
             if messages and isinstance(messages[-1], AIMessage):
                 content = messages[-1].content
-                words = content.split(" ")
-                for i, word in enumerate(words):
-                    space = " " if i > 0 else ""
-                    chunk_text = space + word
-                    
-                    choice_delta = llm.ChoiceDelta(role="assistant", content=chunk_text)
-                    choice = llm.Choice(delta=choice_delta, index=0)
-                    chunk = llm.ChatChunk(request_id="langgraph", choices=[choice])
-                    
-                    # Push token delta chunk onto the channel
-                    self._event_ch.send_nowait(chunk)
-                    # Yield brief time to allow event loop cooperative scheduling without throttling TTS
-                    await asyncio.sleep(0.005)
+                print(f"🤖 [EPIXA AI REPLY]: \"{content}\"\n", flush=True)
+                
+                # Send the complete response cleanly to TTS without artificial sleep gaps
+                choice_delta = llm.ChoiceDelta(role="assistant", content=content)
+                choice = llm.Choice(delta=choice_delta, index=0)
+                chunk = llm.ChatChunk(request_id="langgraph", choices=[choice])
+                self._event_ch.send_nowait(chunk)
             else:
                 choice_delta = llm.ChoiceDelta(role="assistant", content="I'm here to help. What can I do for you today?")
                 choice = llm.Choice(delta=choice_delta, index=0)

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Room, RoomEvent } from 'livekit-client';
-import { Phone, Mic, MicOff, PhoneOff, RefreshCw, Zap } from 'lucide-react';
+import { Mic, MicOff, PhoneOff, RefreshCw, Zap, Headphones } from 'lucide-react';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || 'http://localhost:8000';
 
@@ -9,7 +9,6 @@ export default function JoinCallButton({ roomName, sessionId, onConnectionChange
   const [isMuted, setIsMuted] = useState(false);
   const roomRef = useRef(null);
   const audioElementsRef = useRef(new Map());
-  // Track whether disconnect was triggered intentionally by the agent
   const intentionalDisconnectRef = useRef(false);
 
   const isEnded = status === 'completed' || status === 'dropped' || status === 'error' || status === 'timeout' || connState === 'ended';
@@ -23,7 +22,6 @@ export default function JoinCallButton({ roomName, sessionId, onConnectionChange
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Notify backend that the session has ended
   const markSessionEnded = async () => {
     try {
       await fetch(`${BACKEND_URL}/api/rooms/end-session`, {
@@ -74,14 +72,11 @@ export default function JoinCallButton({ roomName, sessionId, onConnectionChange
 
       // 3. Register room event handlers
       room.on(RoomEvent.ConnectionStateChanged, async (state) => {
-        console.log(`[Dashboard LK] Connection state: ${state}`);
         if (state === 'connected') {
           setConnState('connected');
           if (onConnectionChange) onConnectionChange('connected');
         } else if (state === 'disconnected') {
-          // If the agent didn't intentionally disconnect, the customer ended the call
           if (!intentionalDisconnectRef.current) {
-            // Mark session as ended on backend immediately
             await markSessionEnded();
             setConnState('ended');
             if (onConnectionChange) onConnectionChange('disconnected');
@@ -90,17 +85,15 @@ export default function JoinCallButton({ roomName, sessionId, onConnectionChange
             setConnState('disconnected');
             if (onConnectionChange) onConnectionChange('disconnected');
           }
-          // Clean up audio elements
           audioElementsRef.current.forEach((el) => el.remove());
           audioElementsRef.current.clear();
           roomRef.current = null;
         }
       });
 
-      // Handle track subscription to play customer and AI audio in the dashboard browser
+      // Handle track subscription
       room.on(RoomEvent.TrackSubscribed, (track, publication, participant) => {
         if (track.kind === 'audio') {
-          console.log(`[Dashboard LK] Subscribed to audio track from: ${participant.identity}`);
           const el = track.attach();
           document.body.appendChild(el);
           audioElementsRef.current.set(track.sid, el);
@@ -153,7 +146,6 @@ export default function JoinCallButton({ roomName, sessionId, onConnectionChange
     } catch (err) {
       console.error('[Dashboard LK] Error during disconnect:', err);
     } finally {
-      // Clean up DOM audio tags
       audioElementsRef.current.forEach((el) => el.remove());
       audioElementsRef.current.clear();
       roomRef.current = null;
@@ -165,18 +157,14 @@ export default function JoinCallButton({ roomName, sessionId, onConnectionChange
   const handBackToAI = async () => {
     if (!roomRef.current) return;
     try {
-      // Publish the 'resume' action over the data channel to inform the AI worker
       const encoder = new TextEncoder();
       const data = encoder.encode(JSON.stringify({ action: "resume" }));
       
-      // Publish data reliably to all participants
       await roomRef.current.localParticipant.publishData(data, { reliable: true });
-      console.log('[Dashboard LK] Resume signal sent. Handing back to AI...');
       
-      // Brief pause to ensure packet is sent before disconnecting
-      await new Promise(resolve => setTimeout(resolve, 200));
+      // Brief pause for AI to process resume signal
+      await new Promise(resolve => setTimeout(resolve, 1000));
       
-      // Leave the room
       await disconnectRoom();
     } catch (err) {
       console.error('[Dashboard LK] Error handing back to AI:', err);
@@ -186,149 +174,122 @@ export default function JoinCallButton({ roomName, sessionId, onConnectionChange
 
   if (isEnded) {
     return (
-      <button className="btn btn-secondary disabled" style={{ cursor: 'not-allowed' }} disabled>
-        <PhoneOff size={16} />
-        <span>Call Ended</span>
-      </button>
+      <div className="supervisor-btn-group">
+        <button className="saas-btn saas-btn-secondary" disabled>
+          <PhoneOff size={15} />
+          <span>Call Ended</span>
+        </button>
+      </div>
     );
   }
 
   if (connState === 'disconnected') {
     return (
-      <button className="btn btn-primary" onClick={handleJoinClick}>
-        <Phone size={16} />
-        <span>Join Live Call</span>
-      </button>
+      <div className="supervisor-btn-group">
+        <button className="saas-btn saas-btn-primary supervisor-join-btn" onClick={handleJoinClick}>
+          <Headphones size={16} />
+          <span>Join Live Call</span>
+        </button>
+      </div>
     );
   }
 
   if (connState === 'connecting') {
     return (
-      <button className="btn btn-secondary disabled" disabled>
-        <RefreshCw size={16} className="spinning" />
-        <span>Connecting to Call...</span>
-      </button>
+      <div className="supervisor-btn-group">
+        <button className="saas-btn saas-btn-secondary" disabled>
+          <RefreshCw size={15} className="spin-fast" />
+          <span>Connecting Live Stream...</span>
+        </button>
+      </div>
     );
   }
 
+  // Connected Active Deck
   return (
-    <div className="connection-controls">
+    <div className="supervisor-live-deck">
+      {/* Live Badge */}
+      <div className="supervisor-live-badge">
+        <span className="live-pulse-dot" />
+        <span>Supervisor Live</span>
+      </div>
+
       {/* Mute toggle button */}
       <button 
-        className={`btn ${isMuted ? 'btn-danger' : 'btn-secondary'}`}
+        className={`saas-btn ${isMuted ? 'saas-btn-danger' : 'saas-btn-secondary'}`}
         onClick={toggleMute}
+        title={isMuted ? "Unmute your microphone" : "Mute your microphone"}
       >
-        {isMuted ? <MicOff size={16} /> : <Mic size={16} />}
-        <span>{isMuted ? 'Unmute Mic' : 'Mute Mic'}</span>
+        {isMuted ? <MicOff size={15} /> : <Mic size={15} />}
+        <span>{isMuted ? 'Unmute' : 'Mute'}</span>
       </button>
 
       {/* Hand back to AI button */}
-      <button className="btn btn-accent" onClick={handBackToAI}>
-        <Zap size={16} />
+      <button className="saas-btn saas-btn-emerald" onClick={handBackToAI} title="Resume AI voice assistant">
+        <Zap size={15} />
         <span>Hand Back to AI</span>
       </button>
 
-      {/* Force disconnect button */}
-      <button className="btn btn-danger-filled" onClick={disconnectRoom}>
-        <PhoneOff size={16} />
-        <span>Disconnect Call</span>
+      {/* Leave Room button */}
+      <button className="saas-btn saas-btn-danger-solid" onClick={disconnectRoom} title="Leave room">
+        <PhoneOff size={15} />
+        <span>Leave Call</span>
       </button>
 
       <style>{`
-        .connection-controls {
+        .supervisor-btn-group {
           display: flex;
           align-items: center;
-          gap: 12px;
-          flex-wrap: wrap;
         }
 
-        .btn {
+        .supervisor-join-btn {
+          font-family: var(--saas-font-display);
+          font-weight: 700;
+          letter-spacing: -0.01em;
+        }
+
+        .supervisor-live-deck {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          flex-wrap: wrap;
+          background: rgba(15, 18, 26, 0.85);
+          border: 1px solid var(--saas-border-medium);
+          padding: 6px 12px;
+          border-radius: var(--saas-radius-lg);
+          box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+        }
+
+        .supervisor-live-badge {
           display: inline-flex;
           align-items: center;
-          gap: 8px;
-          border-radius: 12px;
-          padding: 10px 18px;
-          font-size: 14px;
-          font-weight: 600;
-          cursor: pointer;
-          transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-          border: 1px solid transparent;
+          gap: 6px;
+          font-size: 11.5px;
+          font-weight: 700;
+          color: #34d399;
+          background: rgba(16, 185, 129, 0.12);
+          padding: 4px 10px;
+          border-radius: var(--saas-radius-full);
+          border: 1px solid rgba(16, 185, 129, 0.3);
+          text-transform: uppercase;
+          letter-spacing: 0.04em;
         }
 
-        .btn-primary {
-          background: linear-gradient(135deg, #8b5cf6 0%, #6366f1 100%);
-          color: white;
-          box-shadow: 0 4px 12px rgba(99, 102, 241, 0.25);
+        .live-pulse-dot {
+          width: 6px;
+          height: 6px;
+          border-radius: 50%;
+          background: #10b981;
+          box-shadow: 0 0 8px #10b981;
+          animation: pulseRecord 1.4s infinite alternate;
         }
 
-        .btn-primary:hover {
-          transform: translateY(-1px);
-          box-shadow: 0 6px 16px rgba(99, 102, 241, 0.35);
+        .spin-fast {
+          animation: spinFast 0.8s linear infinite;
         }
 
-        .btn-primary.disabled, .btn-primary:disabled {
-          background: linear-gradient(135deg, rgba(139, 92, 246, 0.15) 0%, rgba(99, 102, 241, 0.15) 100%);
-          color: rgba(255, 255, 255, 0.35);
-          border: 1px dashed rgba(139, 92, 246, 0.3);
-          box-shadow: none;
-          cursor: not-allowed;
-          transform: none !important;
-        }
-
-        .btn-secondary {
-          background: rgba(255, 255, 255, 0.04);
-          color: #e2e8f0;
-          border-color: rgba(255, 255, 255, 0.08);
-        }
-
-        .btn-secondary:hover {
-          background: rgba(255, 255, 255, 0.08);
-        }
-
-        .btn-danger {
-          background: rgba(239, 68, 68, 0.08);
-          color: #f87171;
-          border-color: rgba(239, 68, 68, 0.2);
-        }
-
-        .btn-danger:hover {
-          background: rgba(239, 68, 68, 0.15);
-        }
-
-        .btn-danger-filled {
-          background: #ef4444;
-          color: white;
-          box-shadow: 0 4px 12px rgba(239, 68, 68, 0.2);
-        }
-
-        .btn-danger-filled:hover {
-          background: #dc2626;
-          transform: translateY(-1px);
-        }
-
-        .btn-accent {
-          background: linear-gradient(135deg, #10b981 0%, #059669 100%);
-          color: white;
-          box-shadow: 0 4px 12px rgba(16, 185, 129, 0.25);
-        }
-
-        .btn-accent:hover {
-          transform: translateY(-1px);
-          box-shadow: 0 6px 16px rgba(16, 185, 129, 0.35);
-        }
-
-        .disabled {
-          opacity: 0.6;
-          cursor: not-allowed;
-        }
-
-        .spinning {
-          animation: spin 1s linear infinite;
-        }
-
-        @keyframes spin {
-          0% { transform: rotate(0deg); }
-          100% { transform: rotate(360deg); }
+        @keyframes spinFast {
+          to { transform: rotate(360deg); }
         }
       `}</style>
     </div>

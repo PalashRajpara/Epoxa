@@ -3,10 +3,14 @@ import re
 import json
 import logging
 import httpx
-from typing import Dict, Any, Optional
-from langchain_core.messages import AIMessage, SystemMessage
+from typing import Dict, Any, Optional, List
+from dotenv import load_dotenv
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, BaseMessage
 from langchain_openai import ChatOpenAI
 from langchain_core.runnables import RunnableConfig
+
+# Ensure .env is loaded
+load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), "../.env"), override=True)
 
 # Flat imports
 from state import AgentState
@@ -16,31 +20,71 @@ from chroma_client import query_faq
 logger = logging.getLogger("nodes")
 BACKEND_URL = os.getenv("BACKEND_URL", "http://127.0.0.1:8000")
 
-def get_groq_llm() -> ChatOpenAI:
+def get_groq_llm(max_tokens: Optional[int] = 250, temperature: float = 0.3) -> ChatOpenAI:
     """
     Exposes a ChatOpenAI client pointing to Groq's Llama model.
-    Using Groq provides fast response generation for the voice assistant.
     """
+    api_key = os.getenv("GROQ_API_KEY", "").strip()
     return ChatOpenAI(
         model="llama-3.1-8b-instant",
         base_url="https://api.groq.com/openai/v1",
-        api_key=os.getenv("GROQ_API_KEY")
-    )
-
-
-def get_fast_groq_llm(max_tokens: Optional[int] = None, temperature: float = 0.0) -> ChatOpenAI:
-    """
-    Exposes a ChatOpenAI client configured for low latency extraction and classification.
-    Sets greedy decoding, limits maximum tokens, and applies a strict request timeout.
-    """
-    return ChatOpenAI(
-        model="llama-3.1-8b-instant",
-        base_url="https://api.groq.com/openai/v1",
-        api_key=os.getenv("GROQ_API_KEY"),
+        api_key=api_key,
         temperature=temperature,
         max_tokens=max_tokens,
-        request_timeout=5.0
+        request_timeout=15.0
     )
+
+
+def get_fast_groq_llm(max_tokens: Optional[int] = 20, temperature: float = 0.0) -> ChatOpenAI:
+    """
+    Fast extraction & classification LLM client.
+    """
+    api_key = os.getenv("GROQ_API_KEY", "").strip()
+    return ChatOpenAI(
+        model="llama-3.1-8b-instant",
+        base_url="https://api.groq.com/openai/v1",
+        api_key=api_key,
+        temperature=temperature,
+        max_tokens=max_tokens,
+        request_timeout=10.0
+    )
+
+
+def sanitize_messages_for_llm(system_prompt: str, raw_messages: List[Any], max_history: int = 6) -> List[BaseMessage]:
+    """
+    Constructs a clean, valid message list for Groq/OpenAI APIs:
+    - Exactly 1 SystemMessage at index 0
+    - Alternating/valid HumanMessage and AIMessage with non-empty string content
+    - Filters out any nested lists or invalid message structures
+    """
+    clean_messages: List[BaseMessage] = [SystemMessage(content=system_prompt.strip())]
+    
+    # Take last N messages
+    slice_msgs = raw_messages[-max_history:] if max_history else raw_messages
+    for m in slice_msgs:
+        content_str = ""
+        if isinstance(m, BaseMessage):
+            if isinstance(m, SystemMessage):
+                continue  # Skip inner system messages
+            content_str = m.content if isinstance(m.content, str) else str(m.content or "")
+            if not content_str.strip():
+                continue
+            if isinstance(m, HumanMessage):
+                clean_messages.append(HumanMessage(content=content_str.strip()))
+            elif isinstance(m, AIMessage):
+                clean_messages.append(AIMessage(content=content_str.strip()))
+        elif isinstance(m, dict):
+            role = m.get("role", "")
+            text = m.get("content") or m.get("text", "")
+            content_str = text if isinstance(text, str) else str(text or "")
+            if not content_str.strip() or role == "system":
+                continue
+            if role in ("user", "customer"):
+                clean_messages.append(HumanMessage(content=content_str.strip()))
+            else:
+                clean_messages.append(AIMessage(content=content_str.strip()))
+
+    return clean_messages
 
 
 # =============================================================================
@@ -136,7 +180,7 @@ def classify_customer_type(user_message: str) -> str:
 
 def classify_intent(user_message: str) -> str:
     """
-    Performs quick LLM-based categorization of the user's request.
+    Performs quick categorization of the user's request using keyword matching + LLM fallback.
     
     Returns one of:
         'appointment' (schedule/book slot)
@@ -145,16 +189,33 @@ def classify_intent(user_message: str) -> str:
         'escalate' (human handover request)
         'chat' (general talk/idle turn)
     """
+    text_clean = (user_message or "").strip()
+    text_lower = text_clean.lower()
+    
+    # 1. Fast regex & keyword heuristics (zero latency, 100% reliable)
+    if re.search(r'\b(speak\s+to\s+a?\s*human|talk\s+to\s+a?\s*human|transfer|supervisor|human\s+agent|representative|manager|handoff|handover)\b', text_lower):
+        return "escalate"
+        
+    if re.search(r'\b(appointment|book\s+an?\s*appointment|book\s+my\s*appointment|schedule|reschedule|book\s+a?\s*slot|booking)\b', text_lower):
+        return "appointment"
+        
+    if re.search(r'\b(complaint|file\s+a?\s*complaint|grievance|issue|problem|broken|frustrated|refund|terrible|not\s+working|dispute)\b', text_lower):
+        return "complaint"
+        
+    if re.search(r'\b(hours|working\s+hours|opening\s+hours|location|address|where\s+are\s+you|what\s+do\s+you\s+do|services|pricing|cost)\b', text_lower):
+        return "faq"
+
+    # 2. LLM-based categorization for ambiguous utterances
     try:
         prompt = (
-            "Analyze the following customer utterance and classify their intent into exactly one of these categories:\n"
+            "Analyze the following customer utterance and classify their intent into exactly one category:\n"
             "- 'appointment': The user wants to book, schedule, or reschedule an appointment.\n"
-            "- 'complaint': The user wants to file a complaint, report a problem, or is expressing frustration with a product/service.\n"
-            "- 'faq': The user has a general question (e.g., about opening hours, locations, address, refund policy, business operations).\n"
-            "- 'escalate': The user wants to speak to a human, supervisor, agent, manager, or wants to transfer.\n"
-            "- 'chat': General smalltalk, greeting, thank you, or simple response.\n\n"
-            f"Utterance: '{user_message}'\n\n"
-            "Respond ONLY with one of the category names: appointment, complaint, faq, escalate, or chat. Do not include any extra text."
+            "- 'complaint': The user wants to file a complaint, report a problem, or is expressing frustration.\n"
+            "- 'faq': The user has a question about opening hours, locations, address, policies, or services.\n"
+            "- 'escalate': The user wants to speak to a human representative or transfer.\n"
+            "- 'chat': General smalltalk, greeting (hello/hi), mic check ('am I audible'), thank you, or simple chatter.\n\n"
+            f"Utterance: '{text_clean}'\n\n"
+            "Respond ONLY with one word: appointment, complaint, faq, escalate, or chat."
         )
         response = get_fast_groq_llm(max_tokens=10).invoke(prompt)
         intent = response.content.strip().lower()
@@ -165,7 +226,7 @@ def classify_intent(user_message: str) -> str:
                 return valid
         return "chat"
     except Exception as e:
-        logger.error(f"Error classifying intent: {str(e)}")
+        logger.warning(f"LLM intent classification fallback to chat: {e}")
         return "chat"
 
 
@@ -460,11 +521,51 @@ def appointment_node(state: AgentState) -> dict:
             "appointment_details": appt_details
         }
         
-    # Both details collected successfully!
+    # Both details collected — check if we need confirmation before booking
+    if not appt_details.get("pending_confirmation"):
+        # First time both are present: echo back and ask for confirmation
+        appt_details["pending_confirmation"] = True
+        confirm_msg = (
+            f"Just to confirm, you'd like to schedule your appointment for "
+            f"{appt_details.get('date')} at {appt_details.get('time')}. "
+            f"Is that correct?"
+        )
+        return {
+            "messages": [AIMessage(content=confirm_msg)],
+            "appointment_details": appt_details,
+            "current_flow": "booking"
+        }
+    
+    # Pending confirmation — check the customer's response
+    user_response = last_user_message.lower().strip()
+    affirmative_words = ["yes", "yeah", "yep", "correct", "right", "sure", "confirm", "okay", "ok", "that's right", "go ahead", "book it", "sounds good"]
+    negative_words = ["no", "nope", "wrong", "change", "different", "not right", "incorrect"]
+    
+    is_affirmative = any(word in user_response for word in affirmative_words)
+    is_negative = any(word in user_response for word in negative_words)
+    
+    if is_negative:
+        # Customer wants to change — reset and ask again
+        return {
+            "messages": [AIMessage(content="No problem! What date and time would you prefer instead?")],
+            "appointment_details": {"date": None, "time": None},
+            "current_flow": "booking"
+        }
+    
+    if not is_affirmative:
+        # Unclear response — ask again
+        return {
+            "messages": [AIMessage(content=f"I have your appointment for {appt_details.get('date')} at {appt_details.get('time')}. Should I go ahead and book that?")],
+            "appointment_details": appt_details,
+            "current_flow": "booking"
+        }
+    
+    # Confirmed! Book the appointment
     import random
     confirmation_code = f"APT-{random.randint(1000, 9999)}"
     appt_details["confirmation_code"] = confirmation_code
     appt_details["booked"] = True
+    appt_details["pending_confirmation"] = False
     
     confirmation_msg = (
         f"Excellent! I have scheduled your appointment for {appt_details.get('date')} at {appt_details.get('time')}. "
@@ -587,20 +688,44 @@ def general_chat_node(state: AgentState) -> dict:
     greetings, and closing remarks.
     """
     prompt_context = (
-        "You are a polite, helpful customer support voice assistant for Epoxcel. "
-        "Keep your responses concise, friendly, and conversational. "
-        "Do not use list formatting. Speak in natural complete sentences.\n"
+        "You are Epixa, an intelligent and friendly voice customer support assistant for Epoxcel. "
+        "The caller is speaking to you over a live voice phone/web call. "
+        "Keep your response concise, natural, and conversational (1 to 2 sentences max). "
+        "If the user asks 'Am I audible?' or 'Can you hear me?', warmly confirm you can hear them and ask how you can assist them. "
+        "Never use markdown bullet points, symbols, or emojis in your speech."
     )
-    messages_for_llm = [SystemMessage(content=prompt_context)]
-    for msg in state["messages"][-5:]:
-        messages_for_llm.append(msg)
-        
+    raw_msgs = state.get("messages", [])
+    messages_for_llm = sanitize_messages_for_llm(prompt_context, raw_msgs, max_history=6)
+    
+    reply = ""
     try:
-        response = get_groq_llm().invoke(messages_for_llm)
+        response = get_groq_llm(max_tokens=150, temperature=0.3).invoke(messages_for_llm)
         reply = response.content.strip()
+        print(f"🤖 [GENERAL CHAT LLM]: {reply}", flush=True)
     except Exception as e:
-        logger.error(f"Error in general chat: {str(e)}")
-        reply = "I'm here to help. You can ask me to book an appointment, file a complaint, or answer general FAQs."
+        logger.error(f"Error in general chat LLM call: {str(e)}")
+        # Check last user utterance for smart fallback
+        last_human = ""
+        for m in reversed(raw_msgs):
+            if isinstance(m, HumanMessage):
+                last_human = m.content.lower()
+                break
+            elif isinstance(m, dict) and m.get("role") in ("user", "customer"):
+                last_human = str(m.get("content") or m.get("text") or "").lower()
+                break
+
+        if any(w in last_human for w in ["audible", "hear me", "can you hear"]):
+            reply = "Yes, I can hear you loud and clear! How can I help you today?"
+        elif any(w in last_human for w in ["hello", "hi", "hey"]):
+            reply = "Hello! I am Epixa. How can I help you today?"
+        elif any(w in last_human for w in ["appointment", "book", "schedule"]):
+            reply = "I would be happy to help you book an appointment. First, are you an existing or new customer?"
+        elif any(w in last_human for w in ["complaint", "issue", "problem"]):
+            reply = "I'm sorry to hear that you are having an issue. Could you please describe the problem so I can record it?"
+        else:
+            reply = "I'm listening. How can I assist you today?"
+            
+        print(f"🤖 [GENERAL CHAT FALLBACK]: {reply}", flush=True)
         
     return {
         "messages": [AIMessage(content=reply)],

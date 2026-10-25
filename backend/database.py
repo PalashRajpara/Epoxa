@@ -130,9 +130,9 @@ def complete_call_session(
                 "duration_seconds": duration_seconds,
                 "status": status,
             }
-            if summary:
+            if summary is not None:
                 update_data["summary"] = summary
-            if disconnect_reason:
+            if disconnect_reason is not None:
                 update_data["disconnect_reason"] = disconnect_reason
 
             client.table("call_sessions").update(update_data).eq("id", session_id).execute()

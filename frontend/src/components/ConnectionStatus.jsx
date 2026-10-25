@@ -1,191 +1,166 @@
+import React from 'react';
+
 /**
- * frontend/src/components/ConnectionStatus.jsx
- * ================================================
- * A reusable component that displays the current LiveKit connection state
- * with a color-coded pill and animated indicators.
- *
- * WHAT IT SHOWS:
- *   🟢 Connected      — call is active and working
- *   🟡 Connecting...  — establishing connection to LiveKit
- *   🟡 Reconnecting   — connection dropped, auto-recovery in progress
- *   🔴 Disconnected   — not connected to any room
- *
- * HOW TO USE IN A PARENT COMPONENT:
- *   import ConnectionStatus from './ConnectionStatus';
- *   <ConnectionStatus
- *     connectionState="connected"
- *     reconnectAttempt={0}
- *     maxReconnectAttempts={3}
- *   />
- *
- * PROPS:
- *   connectionState (string): LiveKit connection state string.
- *     Possible values: "disconnected", "connecting", "connected", "reconnecting"
- *   reconnectAttempt (number): How many reconnect attempts have been made. Default 0.
- *   maxReconnectAttempts (number): Max reconnect attempts before giving up. Default 3.
+ * ConnectionStatus: Precision SaaS telemetry status pill.
+ * Renders state indicator with subtle micro-glow and reconnecting badge.
  */
-
-import React, { useEffect, useState } from 'react';
-
-// Helper: Maps a connection state string to a display color
-// We use CSS custom property values (color names/codes)
-const STATE_COLORS = {
-  connected: '#10b981',       // Green
-  connecting: '#fbbf24',      // Amber
-  reconnecting: '#f97316',    // Orange (different from connecting so user can tell)
-  disconnected: '#6b7280',    // Gray
-};
-
-// Helper: Maps a connection state to a human-readable label
-const STATE_LABELS = {
-  connected: 'Connected',
-  connecting: 'Connecting...',
-  reconnecting: 'Reconnecting',
-  disconnected: 'Disconnected',
-};
-
 export default function ConnectionStatus({
   connectionState = 'disconnected',
   reconnectAttempt = 0,
   maxReconnectAttempts = 3,
 }) {
-  // Whether to show a pulse animation on the status dot.
-  // We pulse during connecting and reconnecting states.
-  const isAnimating = connectionState === 'connecting' || connectionState === 'reconnecting';
+  const getStatusConfig = () => {
+    switch (connectionState) {
+      case 'connected':
+        return {
+          label: 'Live Connected',
+          dotColor: '#10b981',
+          glow: 'rgba(16, 185, 129, 0.4)',
+          textColor: '#e2e8f0',
+          bgColor: 'rgba(16, 185, 129, 0.08)',
+          borderColor: 'rgba(16, 185, 129, 0.25)',
+          isPulsing: false,
+        };
+      case 'connecting':
+        return {
+          label: 'Connecting...',
+          dotColor: '#fbbf24',
+          glow: 'rgba(251, 191, 36, 0.4)',
+          textColor: '#cbd5e1',
+          bgColor: 'rgba(251, 191, 36, 0.08)',
+          borderColor: 'rgba(251, 191, 36, 0.25)',
+          isPulsing: true,
+        };
+      case 'reconnecting':
+        return {
+          label: 'Reconnecting',
+          dotColor: '#f97316',
+          glow: 'rgba(249, 115, 22, 0.45)',
+          textColor: '#fdba74',
+          bgColor: 'rgba(249, 115, 22, 0.1)',
+          borderColor: 'rgba(249, 115, 22, 0.3)',
+          isPulsing: true,
+        };
+      default:
+        return {
+          label: 'Disconnected',
+          dotColor: '#64748b',
+          glow: 'transparent',
+          textColor: '#94a3b8',
+          bgColor: 'rgba(255, 255, 255, 0.04)',
+          borderColor: 'rgba(255, 255, 255, 0.07)',
+          isPulsing: false,
+        };
+    }
+  };
 
-  // Whether to show the reconnect counter badge (only during reconnecting)
+  const config = getStatusConfig();
   const showReconnectCount = connectionState === 'reconnecting' && reconnectAttempt > 0;
 
-  // Color for the status dot based on current state
-  const dotColor = STATE_COLORS[connectionState] || STATE_COLORS.disconnected;
-
-  // Human-readable label for the current state
-  const label = STATE_LABELS[connectionState] || 'Unknown';
-
   return (
-    <div style={styles.pill}>
-      {/* ── Status Dot ──────────────────────────────────────── */}
-      {/* This is the small colored circle that shows the state at a glance */}
-      <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
-        {/* The solid colored dot */}
+    <div
+      className="saas-connection-pill"
+      style={{
+        backgroundColor: config.bgColor,
+        borderColor: config.borderColor,
+      }}
+    >
+      {/* Indicator Dot with Ping Ring */}
+      <div className="status-dot-wrapper">
         <div
+          className="status-solid-dot"
           style={{
-            ...styles.dot,
-            backgroundColor: dotColor,
-            boxShadow: `0 0 8px ${dotColor}99`, // Soft glow in the same color
+            backgroundColor: config.dotColor,
+            boxShadow: `0 0 8px ${config.glow}`,
           }}
         />
-        {/* Pulse ring — only shows when connecting/reconnecting */}
-        {isAnimating && (
+        {config.isPulsing && (
           <div
+            className="status-ping-ring"
             style={{
-              ...styles.pulseRing,
-              borderColor: dotColor,
-              // The CSS animation is defined in the <style> block below
-              animation: 'connectionPulse 1.2s ease-out infinite',
+              borderColor: config.dotColor,
             }}
           />
         )}
       </div>
 
-      {/* ── State Label ─────────────────────────────────────── */}
-      <span
-        style={{
-          ...styles.label,
-          color: connectionState === 'connected' ? '#e5e7eb' : '#9ca3af',
-        }}
-      >
-        {label}
+      {/* Label */}
+      <span className="status-pill-label" style={{ color: config.textColor }}>
+        {config.label}
       </span>
 
-      {/* ── Reconnect Counter ───────────────────────────────── */}
-      {/* Only shown when reconnecting so the user knows progress */}
+      {/* Reconnect Attempts Counter Badge */}
       {showReconnectCount && (
-        <span style={styles.reconnectBadge}>
+        <span className="reconnect-counter-tag saas-mono">
           {reconnectAttempt}/{maxReconnectAttempts}
         </span>
       )}
 
-      {/* ── Inline Keyframe CSS ─────────────────────────────── */}
-      {/* We inject the animation CSS directly here so this component is self-contained */}
       <style>{`
-        @keyframes connectionPulse {
+        .saas-connection-pill {
+          display: inline-flex;
+          align-items: center;
+          gap: 8px;
+          padding: 5px 12px;
+          border-radius: var(--saas-radius-full);
+          border: 1px solid;
+          transition: all var(--saas-transition-normal);
+          flex-shrink: 0;
+        }
+
+        .status-dot-wrapper {
+          position: relative;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          width: 8px;
+          height: 8px;
+        }
+
+        .status-solid-dot {
+          width: 7px;
+          height: 7px;
+          border-radius: 50%;
+          transition: all var(--saas-transition-fast);
+        }
+
+        .status-ping-ring {
+          position: absolute;
+          width: 7px;
+          height: 7px;
+          border-radius: 50%;
+          border: 1.5px solid;
+          animation: statusPing 1.6s cubic-bezier(0, 0, 0.2, 1) infinite;
+        }
+
+        @keyframes statusPing {
           0% {
             transform: scale(1);
-            opacity: 0.8;
+            opacity: 0.9;
           }
-          100% {
-            transform: scale(2.4);
+          75%, 100% {
+            transform: scale(2.6);
             opacity: 0;
           }
+        }
+
+        .status-pill-label {
+          font-size: 12px;
+          font-weight: 600;
+          letter-spacing: 0.02em;
+          white-space: nowrap;
+        }
+
+        .reconnect-counter-tag {
+          font-size: 10.5px;
+          font-weight: 700;
+          color: #f97316;
+          background: rgba(249, 115, 22, 0.18);
+          padding: 1px 6px;
+          border-radius: var(--saas-radius-full);
+          border: 1px solid rgba(249, 115, 22, 0.35);
         }
       `}</style>
     </div>
   );
 }
-
-// =============================================================================
-// STYLES
-// =============================================================================
-// We use inline styles (plain JavaScript objects) to keep this component
-// fully self-contained — no external CSS file needed.
-// Style properties use camelCase (e.g., "borderRadius" not "border-radius").
-
-const styles = {
-  // The outer pill container
-  pill: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '8px',
-    padding: '6px 14px',
-    background: 'rgba(255, 255, 255, 0.05)',
-    borderRadius: '20px',
-    border: '1px solid rgba(255, 255, 255, 0.08)',
-    // Smooth transition when state changes (e.g., disconnected → connecting)
-    transition: 'all 0.3s ease',
-    // Don't let it grow too big
-    flexShrink: 0,
-  },
-
-  // The solid colored status dot
-  dot: {
-    width: '8px',
-    height: '8px',
-    borderRadius: '50%',          // Makes it a circle
-    flexShrink: 0,
-    transition: 'background-color 0.3s ease, box-shadow 0.3s ease',
-  },
-
-  // The animated pulse ring behind the dot (only visible when animating)
-  pulseRing: {
-    position: 'absolute',
-    top: '50%',
-    left: '50%',
-    transform: 'translate(-50%, -50%)',
-    width: '8px',
-    height: '8px',
-    borderRadius: '50%',
-    border: '2px solid',          // The border color is set dynamically in JSX
-    boxSizing: 'border-box',
-  },
-
-  // The text label ("Connected", "Connecting...", etc.)
-  label: {
-    fontSize: '12px',
-    fontWeight: '600',
-    letterSpacing: '0.2px',
-    transition: 'color 0.3s ease',
-    whiteSpace: 'nowrap',
-  },
-
-  // The "2/3" reconnect counter badge
-  reconnectBadge: {
-    fontSize: '11px',
-    fontWeight: '700',
-    color: '#f97316',             // Orange to match the reconnecting state color
-    background: 'rgba(249, 115, 22, 0.15)',
-    padding: '1px 6px',
-    borderRadius: '8px',
-    border: '1px solid rgba(249, 115, 22, 0.3)',
-  },
-};

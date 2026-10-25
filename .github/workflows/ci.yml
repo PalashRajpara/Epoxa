@@ -1,0 +1,126 @@
+name: Epoxa CI Pipeline
+
+on:
+  push:
+    branches: [main, 'refactor/*']
+  pull_request:
+    branches: [main]
+
+jobs:
+  secret-scan:
+    name: Gitleaks Secret Scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Run Gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  python-checks:
+    name: Python Lint, Typecheck & Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+          version: "0.4.x"
+
+      - name: Set up Python 3.12
+        run: uv python install 3.12
+
+      - name: Install Python Dependencies
+        run: uv sync
+
+      - name: Ruff Linter & Formatter Check
+        run: |
+          uv run ruff check .
+          uv run ruff format --check .
+
+      - name: Mypy Static Type Checking
+        run: uv run mypy packages/core apps/api
+
+      - name: Run Pytest Test Suite
+        run: uv run pytest --maxfail=1 -v
+
+  database-migrations:
+    name: Alembic Migrations Drift & Rollback
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_DB: epoxa_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgrespassword
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: "0.4.x"
+
+      - name: Set up Python 3.12
+        run: uv python install 3.12
+
+      - name: Install Dependencies
+        run: uv sync
+
+      - name: Test Migration Upgrade Head
+        env:
+          MIGRATION_DATABASE_URL: postgresql+asyncpg://postgres:postgrespassword@localhost:5432/epoxa_test
+        run: uv run alembic -c db/alembic.ini upgrade head
+
+      - name: Test Migration Downgrade Base
+        env:
+          MIGRATION_DATABASE_URL: postgresql+asyncpg://postgres:postgrespassword@localhost:5432/epoxa_test
+        run: uv run alembic -c db/alembic.ini downgrade base
+
+      - name: Re-apply Migration Upgrade Head
+        env:
+          MIGRATION_DATABASE_URL: postgresql+asyncpg://postgres:postgrespassword@localhost:5432/epoxa_test
+        run: uv run alembic -c db/alembic.ini upgrade head
+
+      - name: Check Zero Model Drift
+        env:
+          MIGRATION_DATABASE_URL: postgresql+asyncpg://postgres:postgrespassword@localhost:5432/epoxa_test
+        run: uv run alembic -c db/alembic.ini check
+
+  frontend-checks:
+    name: Frontend TypeScript, Lint & Builds
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Setup pnpm
+        run: corepack enable pnpm
+
+      - name: Install Workspace Dependencies
+        run: pnpm install --frozen-lockfile || pnpm install
+
+      - name: Build TypeScript API Client
+        run: pnpm --filter @epoxa/api-client build
+
+      - name: Build Customer Web App
+        run: pnpm --filter epoxa-web build
+
+      - name: Build Supervisor Dashboard App
+        run: pnpm --filter epoxa-dashboard build

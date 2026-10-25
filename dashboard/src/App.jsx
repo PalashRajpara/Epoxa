@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import ActiveCallsList from './components/ActiveCallsList';
 import TranscriptView from './components/TranscriptView';
 import JoinCallButton from './components/JoinCallButton';
-import { Shield, Sparkles, PhoneCall, HelpCircle, Activity } from 'lucide-react';
+import { Shield, Sparkles, PhoneCall, HelpCircle, Activity, Headphones } from 'lucide-react';
 
 export default function App() {
   const [selectedCall, setSelectedCall] = useState(null);
@@ -11,60 +11,95 @@ export default function App() {
   const handleSelectCall = (call) => {
     // Only allow changing calls if not currently connected
     if (connectionStatus !== 'disconnected') {
-      alert("Please disconnect from the current call before switching sessions.");
+      alert("Please disconnect from the current live call before switching sessions.");
       return;
     }
     setSelectedCall(call);
   };
 
   return (
-    <div className="dashboard-wrapper">
-      {/* Upper header navigation */}
-      <header className="dashboard-header glass">
-        <div className="brand">
-          <div className="logo-glow">
-            <Shield size={24} className="brand-logo" />
+    <div className="saas-dashboard-shell">
+      {/* Top Enterprise Application Header */}
+      <header className="dashboard-top-navbar saas-card-glass">
+        <div className="navbar-left">
+          <div className="brand-emblem-box">
+            <Shield size={20} className="brand-emblem-icon" />
           </div>
-          <div className="brand-text">
-            <h2>Epoxcel</h2>
-            <span>Epixa Voice AI Support Console</span>
+          <div className="brand-title-lockup">
+            <div className="brand-name-row">
+              <span className="brand-name">Epoxcel</span>
+              <span className="brand-version-badge">v3.0 Production</span>
+            </div>
+            <span className="brand-subtitle">Voice AI Supervisor & Escalation Console</span>
           </div>
         </div>
-        <div className="system-status">
-          <Activity size={14} className="pulse-green" />
-          <span>System Status: Online</span>
+
+        <div className="navbar-right">
+          <div className="system-telemetry-chip">
+            <Activity size={13} className="telemetry-live-icon" />
+            <span className="telemetry-label">System Active • Real-time DB Sync</span>
+          </div>
+
+          <div className="supervisor-profile-chip">
+            <div className="supervisor-av-circle">
+              <Headphones size={13} />
+            </div>
+            <span className="supervisor-role-title">Supervisor Console</span>
+          </div>
         </div>
       </header>
 
-      {/* Main dashboard content layout */}
-      <main className="dashboard-main">
-        {/* Sidebar container */}
-        <section className="dashboard-sidebar">
-          <div className="sidebar-card glass">
+      {/* Sticky "Supervisor Live in Room" Alert Ribbon */}
+      {connectionStatus === 'connected' && selectedCall && (
+        <div className="supervisor-live-ribbon">
+          <div className="ribbon-content">
+            <div className="ribbon-pulse-dot" />
+            <span className="ribbon-text">
+              <strong>YOU ARE LIVE:</strong> Connected to room <span className="saas-mono">{selectedCall.room_name}</span> speaking with <strong>{selectedCall.participant_name || 'Customer'}</strong>. AI responses are muted.
+            </span>
+          </div>
+        </div>
+      )}
+
+      {/* Main Workspace Layout (Sidebar + Detail Stage) */}
+      <main className="dashboard-body-grid">
+        {/* Sidebar Container */}
+        <aside className="dashboard-sidebar-column">
+          <div className="sidebar-inner-card saas-card-glass">
             <ActiveCallsList 
               selectedCall={selectedCall} 
               onSelectCall={handleSelectCall} 
             />
           </div>
-        </section>
+        </aside>
 
-        {/* Content Pane container */}
-        <section className="dashboard-content">
+        {/* Content Details Column */}
+        <section className="dashboard-stage-column">
           {selectedCall ? (
-            <div className="details-container">
-              {/* Session summary card */}
-              <div className="details-header-card glass">
-                <div className="card-top">
-                  <div className="meta-left">
-                    <div className="call-avatar">
+            <div className="session-inspector-view">
+              {/* Session Overview Card */}
+              <div className="session-header-plate saas-card-glass">
+                <div className="plate-top-row">
+                  <div className="caller-identity-group">
+                    <div className="caller-av-box">
                       <PhoneCall size={20} />
                     </div>
-                    <div>
-                      <h3>{selectedCall.participant_name || 'Anonymous Customer'}</h3>
-                      <span className="room-subtext">Active Room: {selectedCall.room_name}</span>
+                    <div className="caller-text-group">
+                      <div className="caller-name-heading-row">
+                        <h2 className="caller-full-name">{selectedCall.participant_name || 'Anonymous Customer'}</h2>
+                        <span className={`status-badge-saas ${
+                          selectedCall.status === 'escalated' ? 'badge-saas-escalated' :
+                          selectedCall.status === 'completed' || selectedCall.status === 'dropped' || selectedCall.status === 'error' || selectedCall.status === 'timeout' ? 'badge-saas-ended' : 'badge-saas-active'
+                        }`}>
+                          {selectedCall.status === 'escalated' ? 'Handoff Alert' :
+                           selectedCall.status === 'completed' || selectedCall.status === 'dropped' || selectedCall.status === 'error' || selectedCall.status === 'timeout' ? 'Call Ended' : 'AI Active'}
+                        </span>
+                      </div>
+                      <span className="room-subtag saas-mono">Room: {selectedCall.room_name}</span>
                     </div>
                   </div>
-                  <div className="meta-right">
+
+                  <div className="plate-action-group">
                     <JoinCallButton 
                       roomName={selectedCall.room_name}
                       sessionId={selectedCall.id}
@@ -73,70 +108,97 @@ export default function App() {
                     />
                   </div>
                 </div>
-                
-                <div className="card-divider"></div>
-                
-                <div className="meta-details-row">
-                  <div className="meta-item">
-                    <span className="label">Session ID</span>
-                    <span className="val">{selectedCall.id.substring(0, 18)}...</span>
-                  </div>
-                  <div className="meta-item">
-                    <span className="label">Status</span>
-                    <span className={`val uppercase font-bold ${
-                      selectedCall.status === 'escalated' ? 'text-accent' :
-                      selectedCall.status === 'completed' || selectedCall.status === 'dropped' || selectedCall.status === 'error' || selectedCall.status === 'timeout' ? 'text-ended' : 'text-active'
-                    }`}>
-                      {selectedCall.status === 'escalated' ? 'Handoff Requested' :
-                       selectedCall.status === 'completed' || selectedCall.status === 'dropped' || selectedCall.status === 'error' || selectedCall.status === 'timeout' ? 'Call Ended' : 'AI Active'}
+
+                <div className="plate-divider-line" />
+
+                {/* Structured Metadata Grid */}
+                <div className="session-meta-grid">
+                  <div className="meta-data-cell">
+                    <span className="cell-label">Session UUID</span>
+                    <span className="cell-value saas-mono" title={selectedCall.id}>
+                      {selectedCall.id.substring(0, 16)}...
                     </span>
                   </div>
-                  <div className="meta-item">
-                    <span className="label">Date</span>
-                    <span className="val">{new Date(selectedCall.started_at).toLocaleDateString([], { month: 'short', day: '2-digit', year: 'numeric' })}</span>
+
+                  <div className="meta-data-cell">
+                    <span className="cell-label">Date</span>
+                    <span className="cell-value">
+                      {new Date(selectedCall.started_at).toLocaleDateString([], { month: 'short', day: '2-digit', year: 'numeric' })}
+                    </span>
                   </div>
-                  <div className="meta-item">
-                    <span className="label">Call Started</span>
-                    <span className="val">{new Date(selectedCall.started_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</span>
+
+                  <div className="meta-data-cell">
+                    <span className="cell-label">Started At</span>
+                    <span className="cell-value saas-mono">
+                      {new Date(selectedCall.started_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                    </span>
                   </div>
-                  {(selectedCall.status === 'completed' || selectedCall.status === 'dropped' || selectedCall.status === 'error' || selectedCall.status === 'timeout') && selectedCall.ended_at ? (
-                    <div className="meta-item">
-                      <span className="label">Call Ended</span>
-                      <span className="val">{new Date(selectedCall.ended_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</span>
-                    </div>
-                  ) : (
-                    <div className="meta-item">
-                      <span className="label">Call Ended</span>
-                      <span className="val" style={{ color: '#64748b' }}>Active</span>
-                    </div>
-                  )}
-                  <div className="meta-item">
-                    <span className="label">Duration</span>
-                    <span className="val">
+
+                  <div className="meta-data-cell">
+                    <span className="cell-label">Ended At</span>
+                    <span className="cell-value saas-mono">
+                      {selectedCall.ended_at
+                        ? new Date(selectedCall.ended_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+                        : 'Live Session'}
+                    </span>
+                  </div>
+
+                  <div className="meta-data-cell">
+                    <span className="cell-label">Duration</span>
+                    <span className="cell-value cell-highlight saas-mono">
                       {selectedCall.duration_seconds 
                         ? `${Math.floor(selectedCall.duration_seconds / 60)}m ${selectedCall.duration_seconds % 60}s`
-                        : 'Live'
-                      }
+                        : 'Active Call'}
                     </span>
                   </div>
                 </div>
+
+                {/* Disconnect Reason or Summary Preview if present */}
+                {(selectedCall.summary || selectedCall.disconnect_reason) && (
+                  <div className="post-call-summary-strip">
+                    <span className="summary-title">Call Outcome:</span>
+                    <span className="summary-text">
+                      {selectedCall.summary || selectedCall.disconnect_reason}
+                    </span>
+                  </div>
+                )}
               </div>
 
-              {/* Live transcript card */}
+              {/* Live Transcript View Component */}
               <TranscriptView sessionId={selectedCall.id} />
             </div>
           ) : (
-            <div className="empty-content-state glass">
-              <Sparkles size={56} className="empty-sparkle" />
-              <h3>Support Console Ready</h3>
-              <p>No active call session is currently selected.</p>
-              <span>Click on any customer call in the left panel to inspect the live transcript and join the conversation.</span>
+            /* Empty State Guide */
+            <div className="stage-empty-welcome saas-card-glass">
+              <div className="welcome-halo-icon">
+                <Sparkles size={48} className="welcome-sparkle-svg" />
+              </div>
               
-              <div className="help-box">
-                <HelpCircle size={16} className="help-icon" />
-                <span>
-                  <strong>Handoff Guide:</strong> When a customer's query requires human assistance, the call's status badge will turn red and pulse. Click the call, read the live transcript to gather context, and click <strong>Join Live Call</strong> to speak directly to the customer. When resolved, click <strong>Hand Back to AI</strong>.
-                </span>
+              <h3 className="welcome-main-title">Supervisor Console Ready</h3>
+              <p className="welcome-sub-lead">
+                Select any active call from the queue on the left to monitor live transcripts or join the voice conversation.
+              </p>
+
+              <div className="quick-guide-card">
+                <div className="guide-header">
+                  <HelpCircle size={17} className="guide-info-icon" />
+                  <h4>Escalation & Handoff Playbook</h4>
+                </div>
+                
+                <div className="guide-steps-list">
+                  <div className="guide-step-item">
+                    <div className="step-num">1</div>
+                    <p>When customer verification fails or a user asks for a human, the session status badge turns <strong>RED (Handoff Needed)</strong>.</p>
+                  </div>
+                  <div className="guide-step-item">
+                    <div className="step-num">2</div>
+                    <p>Click the call in the queue to review the real-time transcript and obtain full conversation context.</p>
+                  </div>
+                  <div className="guide-step-item">
+                    <div className="step-num">3</div>
+                    <p>Click <strong>Join Live Call</strong> to speak directly. When finished, click <strong>Hand Back to AI</strong> to resume automated assistance.</p>
+                  </div>
+                </div>
               </div>
             </div>
           )}
@@ -144,299 +206,514 @@ export default function App() {
       </main>
 
       <style>{`
-        body {
-          background-color: #090a0f !important;
-          color: #e2e8f0;
-          font-family: 'Outfit', sans-serif;
+        .saas-dashboard-shell {
+          width: 100%;
+          max-width: 100vw;
+          height: 100vh;
           margin: 0;
-        }
-
-        .dashboard-wrapper {
-          max-width: 1400px;
-          margin: 0 auto;
-          padding: 24px;
-          min-height: 100vh;
+          padding: 14px 20px;
           display: flex;
           flex-direction: column;
-          gap: 24px;
+          gap: 12px;
           box-sizing: border-box;
+          overflow: hidden;
         }
 
-        /* Glassmorphism layout */
-        .glass {
-          background: rgba(20, 24, 33, 0.6);
-          backdrop-filter: blur(20px);
-          -webkit-backdrop-filter: blur(20px);
-          border: 1px solid rgba(255, 255, 255, 0.05);
-          border-radius: 24px;
-          box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.3);
-        }
-
-        /* Header design */
-        .dashboard-header {
+        /* Top Navbar */
+        .dashboard-top-navbar {
           display: flex;
           align-items: center;
           justify-content: space-between;
-          padding: 16px 32px;
-          height: 72px;
-          box-sizing: border-box;
+          padding: 10px 20px;
+          border-radius: var(--saas-radius-lg);
+          gap: 16px;
+          flex-shrink: 0;
         }
 
-        .brand {
+        .navbar-left {
           display: flex;
           align-items: center;
-          gap: 16px;
+          gap: 14px;
         }
 
-        .logo-glow {
-          width: 42px;
-          height: 42px;
-          background: linear-gradient(135deg, #a78bfa 0%, #6366f1 100%);
-          border-radius: 14px;
+        .brand-emblem-box {
+          width: 40px;
+          height: 40px;
+          border-radius: var(--saas-radius-md);
+          background: var(--saas-brand-gradient);
           display: flex;
           align-items: center;
           justify-content: center;
-          box-shadow: 0 4px 14px rgba(99, 102, 241, 0.4);
+          color: #ffffff;
+          box-shadow: 0 4px 16px var(--saas-brand-glow);
         }
 
-        .brand-logo {
-          color: white;
-        }
-
-        .brand-text h2 {
-          margin: 0;
-          font-size: 18px;
-          font-weight: 700;
-          letter-spacing: -0.5px;
+        .brand-emblem-icon {
           color: #ffffff;
         }
 
-        .brand-text span {
-          font-size: 12px;
-          color: #94a3b8;
+        .brand-title-lockup {
+          display: flex;
+          flex-direction: column;
+          gap: 2px;
         }
 
-        .system-status {
+        .brand-name-row {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+        }
+
+        .brand-name {
+          font-family: var(--saas-font-display);
+          font-size: 19px;
+          font-weight: 800;
+          letter-spacing: -0.03em;
+          color: #ffffff;
+        }
+
+        .brand-version-badge {
+          font-size: 10.5px;
+          font-weight: 700;
+          color: #a5b4fc;
+          background: rgba(99, 102, 241, 0.12);
+          border: 1px solid rgba(99, 102, 241, 0.25);
+          padding: 2px 7px;
+          border-radius: var(--saas-radius-full);
+          letter-spacing: 0.02em;
+        }
+
+        .brand-subtitle {
+          font-size: 12px;
+          color: var(--saas-text-muted);
+        }
+
+        .navbar-right {
+          display: flex;
+          align-items: center;
+          gap: 12px;
+        }
+
+        .system-telemetry-chip {
           display: flex;
           align-items: center;
           gap: 8px;
-          font-size: 13px;
-          font-weight: 500;
-          color: #94a3b8;
-          background: rgba(255, 255, 255, 0.03);
-          padding: 6px 14px;
-          border-radius: 9999px;
-          border: 1px solid rgba(255, 255, 255, 0.05);
+          font-size: 12px;
+          font-weight: 600;
+          color: #cbd5e1;
+          background: rgba(255, 255, 255, 0.035);
+          border: 1px solid var(--saas-border-subtle);
+          padding: 6px 12px;
+          border-radius: var(--saas-radius-full);
         }
 
-        .pulse-green {
+        .telemetry-live-icon {
           color: #10b981;
-          animation: pulse-dot 1.5s infinite;
+          animation: pulseRecord 1.6s infinite;
         }
 
-        /* Main Workspace layout */
-        .dashboard-main {
+        .supervisor-profile-chip {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          font-size: 12px;
+          font-weight: 600;
+          color: #e2e8f0;
+          background: rgba(99, 102, 241, 0.08);
+          border: 1px solid rgba(99, 102, 241, 0.2);
+          padding: 5px 12px 5px 6px;
+          border-radius: var(--saas-radius-full);
+        }
+
+        .supervisor-av-circle {
+          width: 24px;
+          height: 24px;
+          border-radius: 50%;
+          background: rgba(99, 102, 241, 0.3);
+          color: #a5b4fc;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+        }
+
+        .supervisor-role-title {
+          letter-spacing: 0.01em;
+        }
+
+        /* Live Ribbon */
+        .supervisor-live-ribbon {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          padding: 10px 20px;
+          background: linear-gradient(90deg, rgba(16, 185, 129, 0.2) 0%, rgba(6, 78, 59, 0.35) 100%);
+          border: 1px solid rgba(16, 185, 129, 0.4);
+          border-radius: var(--saas-radius-md);
+          animation: ribbonGlow 2s infinite alternate;
+          flex-shrink: 0;
+        }
+
+        @keyframes ribbonGlow {
+          0% { box-shadow: 0 0 10px rgba(16, 185, 129, 0.2); }
+          100% { box-shadow: 0 0 20px rgba(16, 185, 129, 0.4); }
+        }
+
+        .ribbon-content {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+        }
+
+        .ribbon-pulse-dot {
+          width: 8px;
+          height: 8px;
+          border-radius: 50%;
+          background: #10b981;
+          box-shadow: 0 0 8px #10b981;
+          animation: pulseRecord 1.2s infinite;
+        }
+
+        .ribbon-text {
+          font-size: 13px;
+          color: #ecfdf5;
+        }
+
+        /* Body Layout Grid */
+        .dashboard-body-grid {
           display: grid;
-          grid-template-columns: 360px 1fr;
-          gap: 24px;
+          grid-template-columns: 350px 1fr;
+          gap: 14px;
           flex: 1;
-        }
-
-        .dashboard-sidebar {
-          display: flex;
-          flex-direction: column;
-        }
-
-        .sidebar-card {
-          padding: 24px;
-          flex: 1;
+          min-height: 0;
           height: 100%;
+          overflow: hidden;
         }
 
-        .dashboard-content {
+        .dashboard-sidebar-column {
           display: flex;
           flex-direction: column;
-          min-height: 520px;
-        }
-
-        .details-container {
-          display: flex;
-          flex-direction: column;
-          gap: 20px;
           height: 100%;
+          min-height: 0;
+          overflow: hidden;
         }
 
-        .details-header-card {
-          padding: 24px;
+        .sidebar-inner-card {
+          padding: 14px;
+          height: 100%;
+          min-height: 0;
+          box-sizing: border-box;
           display: flex;
           flex-direction: column;
-          gap: 16px;
+          overflow: hidden;
         }
 
-        .card-top {
+        .dashboard-stage-column {
+          display: flex;
+          flex-direction: column;
+          height: 100%;
+          min-height: 0;
+          overflow: hidden;
+        }
+
+        .session-inspector-view {
+          display: flex;
+          flex-direction: column;
+          gap: 12px;
+          height: 100%;
+          min-height: 0;
+          overflow: hidden;
+        }
+
+        /* Plate Card */
+        .session-header-plate {
+          padding: 14px 18px;
+          display: flex;
+          flex-direction: column;
+          gap: 10px;
+          flex-shrink: 0;
+        }
+
+        .plate-top-row {
           display: flex;
           justify-content: space-between;
           align-items: center;
-        }
-
-        .meta-left {
-          display: flex;
-          align-items: center;
           gap: 16px;
         }
 
-        .call-avatar {
-          width: 48px;
-          height: 48px;
-          border-radius: 16px;
+        .caller-identity-group {
+          display: flex;
+          align-items: center;
+          gap: 14px;
+        }
+
+        .caller-av-box {
+          width: 44px;
+          height: 44px;
+          border-radius: var(--saas-radius-md);
           background: rgba(99, 102, 241, 0.1);
           color: #8b5cf6;
           display: flex;
           align-items: center;
           justify-content: center;
-          border: 1px solid rgba(99, 102, 241, 0.15);
+          border: 1px solid rgba(99, 102, 241, 0.2);
         }
 
-        .meta-left h3 {
-          margin: 0;
+        .caller-text-group {
+          display: flex;
+          flex-direction: column;
+          gap: 3px;
+        }
+
+        .caller-name-heading-row {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+        }
+
+        .caller-full-name {
+          font-family: var(--saas-font-display);
           font-size: 20px;
           font-weight: 700;
           color: #ffffff;
+          margin: 0;
+          letter-spacing: -0.02em;
         }
 
-        .room-subtext {
-          font-size: 13px;
-          color: #94a3b8;
+        .status-badge-saas {
+          display: inline-flex;
+          align-items: center;
+          padding: 2px 8px;
+          border-radius: var(--saas-radius-full);
+          font-size: 11px;
+          font-weight: 700;
+          letter-spacing: 0.04em;
+          text-transform: uppercase;
         }
 
-        .card-divider {
-          height: 1px;
+        .badge-saas-escalated {
+          background: rgba(239, 68, 68, 0.15);
+          color: #fca5a5;
+          border: 1px solid rgba(239, 68, 68, 0.35);
+        }
+
+        .badge-saas-active {
+          background: rgba(16, 185, 129, 0.12);
+          color: #34d399;
+          border: 1px solid rgba(16, 185, 129, 0.25);
+        }
+
+        .badge-saas-ended {
           background: rgba(255, 255, 255, 0.05);
+          color: #94a3b8;
+          border: 1px solid var(--saas-border-subtle);
+        }
+
+        .room-subtag {
+          font-size: 12px;
+          color: var(--saas-text-muted);
+        }
+
+        .plate-divider-line {
+          height: 1px;
+          background: var(--saas-border-subtle);
           width: 100%;
         }
 
-        .meta-details-row {
-          display: flex;
-          gap: 40px;
-          flex-wrap: wrap;
+        /* Meta Grid */
+        .session-meta-grid {
+          display: grid;
+          grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+          gap: 16px;
         }
 
-        .meta-item {
+        .meta-data-cell {
           display: flex;
           flex-direction: column;
           gap: 4px;
         }
 
-        .meta-item .label {
-          font-size: 11px;
+        .cell-label {
+          font-size: 10.5px;
           text-transform: uppercase;
-          letter-spacing: 0.5px;
-          color: #64748b;
+          letter-spacing: 0.05em;
+          color: var(--saas-text-muted);
           font-weight: 600;
         }
 
-        .meta-item .val {
-          font-size: 14px;
+        .cell-value {
+          font-size: 13.5px;
           font-weight: 500;
           color: #cbd5e1;
         }
 
-        .uppercase {
-          text-transform: uppercase;
+        .cell-highlight {
+          color: #ffffff;
+          font-weight: 600;
         }
 
-        .font-bold {
-          font-weight: 700 !important;
+        .post-call-summary-strip {
+          display: flex;
+          align-items: flex-start;
+          gap: 8px;
+          padding: 10px 14px;
+          background: rgba(99, 102, 241, 0.05);
+          border: 1px solid rgba(99, 102, 241, 0.12);
+          border-radius: var(--saas-radius-md);
+          font-size: 12.5px;
+          line-height: 1.45;
         }
 
-        .text-accent {
-          color: #f87171 !important;
+        .summary-title {
+          font-weight: 700;
+          color: #a5b4fc;
+          flex-shrink: 0;
         }
 
-        .text-active {
-          color: #34d399 !important;
+        .summary-text {
+          color: #e2e8f0;
         }
 
-        .text-ended {
-          color: #94a3b8 !important;
-        }
-
-        /* Empty state styling */
-        .empty-content-state {
+        /* Welcome Empty State */
+        .stage-empty-welcome {
           flex: 1;
           display: flex;
           flex-direction: column;
           align-items: center;
           justify-content: center;
           text-align: center;
-          padding: 80px 40px;
-          color: #94a3b8;
+          padding: 60px 32px;
+          gap: 16px;
         }
 
-        .empty-sparkle {
-          color: #6366f1;
-          margin-bottom: 24px;
-          filter: drop-shadow(0 0 15px rgba(99, 102, 241, 0.4));
-          animation: float-sparkle 3s ease-in-out infinite;
+        .welcome-halo-icon {
+          width: 72px;
+          height: 72px;
+          border-radius: 50%;
+          background: rgba(99, 102, 241, 0.08);
+          color: var(--saas-brand-primary);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          box-shadow: 0 0 35px var(--saas-brand-glow);
+          animation: floatSparkle 3s ease-in-out infinite;
         }
 
-        .empty-content-state h3 {
-          margin: 0 0 8px 0;
+        @keyframes floatSparkle {
+          0%, 100% { transform: translateY(0); }
+          50% { transform: translateY(-6px); }
+        }
+
+        .welcome-main-title {
+          font-family: var(--saas-font-display);
           font-size: 22px;
+          font-weight: 800;
+          letter-spacing: -0.02em;
+          color: #ffffff;
+          margin: 0;
+        }
+
+        .welcome-sub-lead {
+          font-size: 14px;
+          color: var(--saas-text-secondary);
+          max-width: 460px;
+          line-height: 1.55;
+          margin: 0;
+        }
+
+        .quick-guide-card {
+          margin-top: 16px;
+          background: rgba(255, 255, 255, 0.025);
+          border: 1px solid var(--saas-border-subtle);
+          padding: 20px 24px;
+          border-radius: var(--saas-radius-lg);
+          max-width: 580px;
+          width: 100%;
+          text-align: left;
+          box-sizing: border-box;
+          display: flex;
+          flex-direction: column;
+          gap: 14px;
+        }
+
+        .guide-header {
+          display: flex;
+          align-items: center;
+          gap: 9px;
+        }
+
+        .guide-info-icon {
+          color: var(--saas-brand-violet);
+        }
+
+        .guide-header h4 {
+          font-family: var(--saas-font-display);
+          font-size: 13.5px;
           font-weight: 700;
           color: #ffffff;
+          margin: 0;
+          letter-spacing: -0.01em;
         }
 
-        .empty-content-state p {
-          margin: 0 0 16px 0;
-          font-size: 16px;
-          color: #cbd5e1;
-        }
-
-        .empty-content-state span {
-          font-size: 14px;
-          max-width: 440px;
-          line-height: 1.6;
-          color: #64748b;
-        }
-
-        .help-box {
-          margin-top: 40px;
-          background: rgba(99, 102, 241, 0.04);
-          border: 1px solid rgba(99, 102, 241, 0.1);
-          padding: 16px 20px;
-          border-radius: 16px;
-          max-width: 540px;
+        .guide-steps-list {
           display: flex;
-          gap: 12px;
-          text-align: left;
-          font-size: 13px;
-          line-height: 1.5;
-          color: #94a3b8;
+          flex-direction: column;
+          gap: 10px;
         }
 
-        .help-icon {
-          color: #8b5cf6;
+        .guide-step-item {
+          display: flex;
+          align-items: flex-start;
+          gap: 10px;
+        }
+
+        .step-num {
+          width: 18px;
+          height: 18px;
+          border-radius: 50%;
+          background: rgba(99, 102, 241, 0.15);
+          color: #a5b4fc;
+          font-size: 10.5px;
+          font-weight: 700;
+          display: flex;
+          align-items: center;
+          justify-content: center;
           flex-shrink: 0;
-          margin-top: 2px;
+          margin-top: 1px;
         }
 
-        @keyframes pulse-dot {
-          0%, 100% { opacity: 1; }
-          50% { opacity: 0.4; }
+        .guide-step-item p {
+          margin: 0;
+          font-size: 12.5px;
+          color: var(--saas-text-secondary);
+          line-height: 1.45;
         }
 
-        @keyframes float-sparkle {
-          0%, 100% { transform: translateY(0) scale(1); }
-          50% { transform: translateY(-8px) scale(1.05); }
+        .guide-step-item strong {
+          color: #e2e8f0;
         }
 
-        @media (max-width: 1024px) {
-          .dashboard-main {
+        @media (max-width: 1080px) {
+          .dashboard-body-grid {
             grid-template-columns: 1fr;
           }
-          .dashboard-sidebar {
-            max-height: 300px;
+          .dashboard-sidebar-column {
+            max-height: 380px;
+          }
+        }
+
+        @media (max-width: 640px) {
+          .saas-dashboard-shell {
+            padding: 12px 14px 20px;
+          }
+          .dashboard-top-navbar {
+            padding: 12px 16px;
+          }
+          .navbar-right {
+            display: none;
+          }
+          .plate-top-row {
+            flex-direction: column;
+            align-items: flex-start;
           }
         }
       `}</style>

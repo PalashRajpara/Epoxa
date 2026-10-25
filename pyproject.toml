@@ -1,0 +1,98 @@
+[project]
+name = "voice-ai-agent-workspace"
+version = "1.0.0"
+description = "Voice AI Agent Monorepo"
+requires-python = ">=3.12"
+dependencies = [
+    "epoxa-core",
+    "epoxa-api",
+    "epoxa-agent",
+    "alembic>=1.13.0",
+    "greenlet>=3.0.0",
+    "email-validator>=2.0.0",
+]
+
+[tool.uv]
+package = false
+
+[tool.uv.workspace]
+members = [
+    "packages/core",
+    "apps/api",
+    "apps/agent",
+]
+
+[tool.uv.sources]
+epoxa-core = { workspace = true }
+epoxa-api = { workspace = true }
+epoxa-agent = { workspace = true }
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+exclude = [
+    ".git",
+    ".venv",
+    "venv",
+    "node_modules",
+    "build",
+    "dist",
+    "__pycache__",
+]
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "B",   # flake8-bugbear
+    "C4",  # flake8-comprehensions
+    "UP",  # pyupgrade
+    "SIM", # flake8-simplify
+    "TCH", # flake8-type-checking
+]
+ignore = [
+    "E501", # Line length handled by formatter
+    "B008", # Do not perform function call in argument defaults (FastAPI Depends)
+]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+disallow_untyped_decorators = false
+no_implicit_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_return_any = true
+no_implicit_reexport = false
+
+[[tool.mypy.overrides]]
+module = [
+    "livekit.*",
+    "chromadb.*",
+    "sentence_transformers.*",
+    "sounddevice.*",
+    "langchain_core.*",
+    "langchain_openai.*",
+    "langgraph.*",
+]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests", "packages/core/tests", "apps/api/tests", "apps/agent/tests"]
+python_files = ["test_*.py"]
+python_functions = ["test_*"]
+filterwarnings = [
+    "ignore::DeprecationWarning",
+    "ignore::UserWarning",
+]

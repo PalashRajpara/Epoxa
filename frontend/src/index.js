@@ -1,5 +1,6 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
+import './design-system.css';
 import App from './App';
 
 // Mount the App component inside the HTML #root element using React 18 rendering API.

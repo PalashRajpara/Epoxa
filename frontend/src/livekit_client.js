@@ -22,15 +22,24 @@ export class LiveKitHelper {
       onAgentSpeaking,
       onParticipantConnected,
       onParticipantDisconnected,
+      onDisconnected,
       onError
     } = callbacks;
 
     try {
       // 1. Create a new Room instance
       this.room = new Room({
+        adaptiveStream: true,
+        dynacast: true,
         publishDefaults: {
-          audioPreset: 'speech', // Optimize audio bandwidth for human speech
-          dtx: true              // Discontinuous Transmission (saves bandwidth when silent)
+          audioPreset: 'speech',
+          dtx: true,              // Discontinuous Transmission (saves bandwidth when silent)
+          red: true               // Redundant Audio Data (protects against packet loss and audio breaking)
+        },
+        audioCaptureDefaults: {
+          autoGainControl: true,
+          echoCancellation: true, // Crucial: stops speaker sound looping into microphone
+          noiseSuppression: true
         }
       });
 
@@ -87,12 +96,30 @@ export class LiveKitHelper {
         if (onParticipantDisconnected) onParticipantDisconnected(participant);
       });
 
+      // BUG-18 FIX: Detect full disconnection and notify UI so it can return to join screen
+      this.room.on(RoomEvent.Disconnected, (reason) => {
+        console.log(`Room disconnected. Reason: ${reason}`);
+        if (onDisconnected) onDisconnected(reason);
+      });
+
       // 3. Connect to the room
       await this.room.connect(url, token);
       console.log('Successfully connected to LiveKit room!');
       
       // 4. By default, enable the microphone to start speaking
-      await this.setMicrophoneEnabled(true);
+      try {
+        await this.setMicrophoneEnabled(true);
+      } catch (micErr) {
+        // BUG-19 FIX: Provide user-friendly error for mic permission denial
+        if (micErr.name === 'NotAllowedError' || micErr.message?.includes('Permission')) {
+          const userFriendlyError = new Error(
+            'Microphone access was denied. Please allow microphone access in your browser settings and try again.'
+          );
+          if (onError) onError(userFriendlyError);
+          throw userFriendlyError;
+        }
+        throw micErr;
+      }
 
       return this.room;
     } catch (err) {
