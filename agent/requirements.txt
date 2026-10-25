@@ -14,7 +14,7 @@ langchain-core>=0.2.0
 langchain-openai>=0.1.0
 chromadb>=0.4.0
 sentence-transformers>=2.2.0
-httpx>=0.24.0
+httpx>=0.28.1
 
 # Phase 3 Dependencies
 supabase>=2.0.0         # Supabase Python client for saving call sessions/transcripts
