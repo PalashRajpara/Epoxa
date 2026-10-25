@@ -1,4 +1,4 @@
-livekit-agents<1.0
+livekit-agents<2.0
 livekit<1.0
 livekit-api<1.0
 livekit-protocol<1.0
