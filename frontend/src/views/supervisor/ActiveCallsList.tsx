@@ -69,6 +69,8 @@ export const ActiveCallsList: React.FC = () => {
   const supervisorRecognitionRef = useRef<any>(null);
   const supervisorLivekitRoomRef = useRef<Room | null>(null);
   const supervisorRemoteAudioRef = useRef<HTMLAudioElement[]>([]);
+  const incomingSupervisorAudioRef = useRef<HTMLAudioElement | null>(null);
+  const [audioBlocked, setAudioBlocked] = useState(false);
   const supervisorMutedRef = useRef(false);
 
   useEffect(() => {
@@ -154,20 +156,25 @@ export const ActiveCallsList: React.FC = () => {
       if (!supervisorLivekitRoomRef.current) {
         startSupervisorLiveAudio();
       }
-    } else {
+    } else if (!selectedCall || selectedCall?.status === 'completed' || selectedCall?.status === 'failed') {
       stopSupervisorLiveAudio();
     }
   }, [selectedCall?.status, selectedCall?.id]);
 
   // Start supervisor live microphone audio stream for realtime bidirectional WebRTC voice
-  const startSupervisorLiveAudio = async (overrideToken?: string, overrideUrl?: string) => {
-    if (!selectedCallId) return;
+  const startSupervisorLiveAudio = async (overrideToken?: string, overrideUrl?: string, targetSessionId?: string) => {
+    const sessionId = targetSessionId || selectedCallId;
+    if (!sessionId) return;
     try {
+      if (incomingSupervisorAudioRef.current) {
+        incomingSupervisorAudioRef.current.play().catch(() => {});
+      }
+
       // 1. Get LiveKit room token
       let token = overrideToken;
       let livekitUrl = overrideUrl;
       if (!token) {
-        const tokenRes = await api.getSupervisorToken(selectedCallId);
+        const tokenRes = await api.getSupervisorToken(sessionId);
         token = tokenRes.token;
         livekitUrl = tokenRes.livekit_url;
       }
@@ -190,31 +197,50 @@ export const ActiveCallsList: React.FC = () => {
         },
       });
 
+      room.on(RoomEvent.AudioPlaybackStatusChanged, () => {
+        setAudioBlocked(!room.canPlaybackAudio);
+      });
+
       // When customer speaks, attach remote track so supervisor hears customer in real-time
       room.on(RoomEvent.TrackSubscribed, (track: RemoteTrack, publication, participant: RemoteParticipant) => {
         if (track.kind === Track.Kind.Audio) {
-          const el = track.attach();
-          el.id = `livekit-customer-audio-${participant.identity}`;
-          el.style.display = 'none';
-          document.body.appendChild(el);
-          supervisorRemoteAudioRef.current.push(el);
+          if (incomingSupervisorAudioRef.current) {
+            track.attach(incomingSupervisorAudioRef.current);
+            incomingSupervisorAudioRef.current.play().catch(() => {
+              room.startAudio().catch(() => {});
+            });
+          } else {
+            const el = track.attach();
+            document.body.appendChild(el);
+            supervisorRemoteAudioRef.current.push(el);
+          }
           setSpeechFeedback('Customer voice connected. Two-way live voice active!');
         }
       });
 
       room.on(RoomEvent.TrackUnsubscribed, (track: RemoteTrack) => {
-        const attached = track.detach();
-        attached.forEach((el) => {
-          el.remove();
-          supervisorRemoteAudioRef.current = supervisorRemoteAudioRef.current.filter((item) => item !== el);
-        });
+        track.detach();
       });
 
       await room.connect(livekitUrl || 'wss://epoxa-dnmkm636.livekit.cloud', token);
+      await room.startAudio();
       await room.localParticipant.setMicrophoneEnabled(!supervisorMutedRef.current);
       supervisorLivekitRoomRef.current = room;
       setSupervisorMicActive(true);
       setSpeechFeedback('Two-way live voice connected. Speak naturally into your mic.');
+
+      // Check if customer audio track is already published
+      room.remoteParticipants.forEach((participant) => {
+        participant.trackPublications.forEach((pub) => {
+          if (pub.track && pub.track.kind === Track.Kind.Audio) {
+            if (incomingSupervisorAudioRef.current) {
+              pub.track.attach(incomingSupervisorAudioRef.current);
+              incomingSupervisorAudioRef.current.play().catch(() => {});
+            }
+            setSpeechFeedback('Customer voice connected. Two-way live voice active!');
+          }
+        });
+      });
 
       // Setup optional browser SpeechRecognition to transcribe supervisor speech into live transcript stream
       const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
@@ -345,12 +371,26 @@ export const ActiveCallsList: React.FC = () => {
         // Hand back to AI
         await api.handbackCall(selectedCall.id, 'Supervisor returned control to Epoxa AI');
         stopSupervisorLiveAudio();
-        setActionMsg('Call returned to Epoxa AI control.');
+        setActionMsg('Call returned to Epoxa AI control. Epoxa AI is announcing return to customer.');
+        setCalls((prev) =>
+          prev.map((c) =>
+            c.id === selectedCall.id
+              ? { ...c, status: 'active', handoff_state: 'returned_to_ai' }
+              : c
+          )
+        );
       } else {
         // Take over
         const res = await api.takeoverCall(selectedCall.id, 'Supervisor initiated live takeover');
-        setActionMsg('Takeover active. Two-way voice established with customer.');
-        await startSupervisorLiveAudio(res.token, res.livekit_url);
+        setCalls((prev) =>
+          prev.map((c) =>
+            c.id === selectedCall.id
+              ? { ...c, status: 'supervisor_takeover', handoff_state: 'accepted' }
+              : c
+          )
+        );
+        setActionMsg('Takeover active. Two-way voice established with customer. Epoxa AI is paused.');
+        await startSupervisorLiveAudio(res.token, res.livekit_url, selectedCall.id);
       }
       await fetchCalls();
     } catch (err: any) {
@@ -715,7 +755,7 @@ export const ActiveCallsList: React.FC = () => {
                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                       <Volume2 size={16} color="#818cf8" />
                       <span style={{ fontSize: '0.84rem', fontWeight: 700, color: '#ffffff' }}>
-                        Supervisor Voice Console
+                        Supervisor Voice Console • AI Paused
                       </span>
                       <span style={{
                         fontSize: '0.68rem',
@@ -837,6 +877,41 @@ export const ActiveCallsList: React.FC = () => {
                       <span>{speechFeedback}</span>
                     </div>
                   )}
+
+                  {audioBlocked && (
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        if (supervisorLivekitRoomRef.current) {
+                          await supervisorLivekitRoomRef.current.startAudio();
+                        }
+                        setAudioBlocked(false);
+                      }}
+                      style={{
+                        padding: '0.35rem 0.75rem',
+                        borderRadius: '6px',
+                        background: 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)',
+                        color: '#ffffff',
+                        fontWeight: 700,
+                        fontSize: '0.74rem',
+                        border: 'none',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '0.35rem',
+                        marginTop: '0.3rem',
+                      }}
+                    >
+                      <Volume2 size={13} />
+                      <span>🔊 Browser blocked sound • Click to enable audio</span>
+                    </button>
+                  )}
+                  <audio
+                    ref={incomingSupervisorAudioRef}
+                    autoPlay
+                    playsInline
+                    style={{ position: 'fixed', bottom: 0, right: 0, width: '1px', height: '1px', opacity: 0.01, pointerEvents: 'none' }}
+                  />
                 </div>
               ) : (
                 <div style={{

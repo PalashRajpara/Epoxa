@@ -40,6 +40,12 @@ export const CustomerVoiceView: React.FC = () => {
   const isCallEndedRef = useRef<boolean>(false);
   const livekitRoomRef = useRef<Room | null>(null);
   const remoteAudioElementsRef = useRef<HTMLAudioElement[]>([]);
+  const incomingAudioRef = useRef<HTMLAudioElement | null>(null);
+  const [audioBlocked, setAudioBlocked] = useState(false);
+  const lastKnownCallStatusRef = useRef<string>('active');
+  const takeoverAnnouncementRef = useRef<{ text: string; audio_base64?: string } | null>(null);
+  const handbackAnnouncementRef = useRef<{ text: string; audio_base64?: string } | null>(null);
+  const isAnnouncingHandoffRef = useRef<boolean>(false);
 
   // Web Audio Analyser references
   const mediaStreamRef = useRef<MediaStream | null>(null);
@@ -108,22 +114,64 @@ export const CustomerVoiceView: React.FC = () => {
     const interval = setInterval(async () => {
       try {
         const latest = await api.getVoiceSession(session.id);
+        const prevStatus = lastKnownCallStatusRef.current;
+
         if (latest.status === 'completed' && sessionRef.current?.status !== 'completed') {
           handleRemoteCallEnded();
+        } else if (latest.status === 'supervisor_takeover' && prevStatus !== 'supervisor_takeover') {
+          // TRANSITION: Supervisor took over call
+          lastKnownCallStatusRef.current = 'supervisor_takeover';
+          if (sessionRef.current) {
+            sessionRef.current = { ...sessionRef.current, status: 'supervisor_takeover', handoff_state: 'accepted' };
+          }
+          setSession((prev) => (prev ? { ...prev, status: 'supervisor_takeover', handoff_state: 'accepted' } : null));
+
+          // 1. Immediately abort speech recognition so AI takes a total pause
+          if (recognitionRef.current) {
+            try { recognitionRef.current.abort(); } catch (e) {}
+          }
+          stopCurrentAudio();
+
+          // 2. Play takeover announcement to customer
+          isAnnouncingHandoffRef.current = true;
+          let ann = takeoverAnnouncementRef.current;
+          if (!ann) {
+            try {
+              ann = await api.getHandoffAnnouncement('takeover');
+              takeoverAnnouncementRef.current = ann;
+            } catch (e) {}
+          }
+          const takeoverText = ann?.text || "A live customer support supervisor has joined the call and will be speaking with you now. Please hold for just a moment.";
+
+          setVisualizerState('agent_speaking');
+          setSpeechStatusText('Epoxa AI: "A live customer support supervisor has joined the call..."');
+
+          playSpeechAudio(
+            ann?.audio_base64,
+            takeoverText,
+            () => {
+              isAnnouncingHandoffRef.current = false;
+              // Transition to paused state while human supervisor and customer talk live
+              setVisualizerState('supervisor_takeover');
+              setSpeechStatusText('Live Supervisor connected • AI is paused');
+            },
+            false,
+            false
+          );
         } else if (latest.status === 'supervisor_takeover') {
-          if (visualizerState !== 'supervisor_takeover') {
+          // WHILE IN TAKEOVER: Keep visualizer state in supervisor_takeover unless actively speaking announcement
+          if (!isAnnouncingHandoffRef.current && visualizerState !== 'supervisor_takeover') {
             setVisualizerState('supervisor_takeover');
-            setSpeechStatusText('Live Supervisor is connected to audio stream');
+            setSpeechStatusText('Live Supervisor connected • AI is paused');
           }
 
-          // Poll for any new supervisor speech turns
+          // Poll for any supervisor typed turns (AI synthesized turns sent by supervisor)
           try {
             const supervisorTurns = await api.getSupervisorTurns(session.id);
             for (const turn of supervisorTurns) {
               if (turn.id && !playedSupervisorTurnsRef.current.has(turn.id)) {
                 playedSupervisorTurnsRef.current.add(turn.id);
                 // Only synthesize / playback audio if supervisor typed a message for AI speech
-                // (Live supervisor voice is streamed directly via WebRTC LiveKit)
                 if (!turn.is_human && turn.audio_base64) {
                   playSpeechAudio(
                     turn.audio_base64,
@@ -141,9 +189,42 @@ export const CustomerVoiceView: React.FC = () => {
           } catch (e) {
             // ignore supervisor turns polling error
           }
-        } else if (latest.status === 'active' && visualizerState === 'supervisor_takeover') {
-          setVisualizerState('listening');
-          setSpeechStatusText('Returned to Epoxa AI • Listening');
+        } else if (latest.status === 'active' && prevStatus === 'supervisor_takeover') {
+          // TRANSITION: Supervisor handed call back to AI
+          lastKnownCallStatusRef.current = 'active';
+          if (sessionRef.current) {
+            sessionRef.current = { ...sessionRef.current, status: 'active', handoff_state: 'returned_to_ai' };
+          }
+          setSession((prev) => (prev ? { ...prev, status: 'active', handoff_state: 'returned_to_ai' } : null));
+
+          stopCurrentAudio();
+          isAnnouncingHandoffRef.current = true;
+
+          let ann = handbackAnnouncementRef.current;
+          if (!ann) {
+            try {
+              ann = await api.getHandoffAnnouncement('handback');
+              handbackAnnouncementRef.current = ann;
+            } catch (e) {}
+          }
+          const handbackText = ann?.text || "Thank you for speaking with our supervisor. I am Epoxa, and I am back to assist you with anything else you need. How may I help?";
+
+          setVisualizerState('agent_speaking');
+          setSpeechStatusText('Epoxa AI: "I am back to assist you. How may I help?"');
+
+          playSpeechAudio(
+            ann?.audio_base64,
+            handbackText,
+            () => {
+              isAnnouncingHandoffRef.current = false;
+              // Announcement finished: Epoxa AI unpauses and resumes listening!
+              setVisualizerState('listening');
+              setSpeechStatusText('Epoxa AI is listening... Speak naturally');
+              startListening();
+            },
+            false,
+            false
+          );
         }
       } catch (e) {
         // ignore polling error
@@ -230,10 +311,13 @@ export const CustomerVoiceView: React.FC = () => {
 
         audio.onended = () => {
           isSpeakingRef.current = false;
+          if (onEnd) {
+            onEnd();
+            return;
+          }
           if (isClosingTurn || isCallEndedRef.current) {
             setVisualizerState('ended');
             setSpeechStatusText('Call completed');
-            if (onEnd) onEnd();
             return;
           }
           if (isSupervisor) {
@@ -242,9 +326,8 @@ export const CustomerVoiceView: React.FC = () => {
           } else {
             setVisualizerState('listening');
             setSpeechStatusText('Listening for your voice... Speak naturally');
+            startListening();
           }
-          if (onEnd) onEnd();
-          startListening();
         };
 
         audio.onerror = (e) => {
@@ -322,10 +405,13 @@ export const CustomerVoiceView: React.FC = () => {
 
     utterance.onend = () => {
       isSpeakingRef.current = false;
+      if (onEnd) {
+        onEnd();
+        return;
+      }
       if (isClosingTurn || isCallEndedRef.current) {
         setVisualizerState('ended');
         setSpeechStatusText('Call completed');
-        if (onEnd) onEnd();
         return;
       }
       if (isSupervisor) {
@@ -334,22 +420,25 @@ export const CustomerVoiceView: React.FC = () => {
       } else {
         setVisualizerState('listening');
         setSpeechStatusText('Listening for your voice... Speak naturally');
+        startListening();
       }
-      if (onEnd) onEnd();
-      startListening();
     };
 
     utterance.onerror = () => {
       isSpeakingRef.current = false;
+      if (onEnd) {
+        onEnd();
+        return;
+      }
       if (isClosingTurn || isCallEndedRef.current) {
         setVisualizerState('ended');
         setSpeechStatusText('Call completed');
-        if (onEnd) onEnd();
         return;
       }
       setVisualizerState(isSupervisor ? 'supervisor_takeover' : 'listening');
-      if (onEnd) onEnd();
-      startListening();
+      if (!isSupervisor) {
+        startListening();
+      }
     };
 
     window.speechSynthesis.speak(utterance);
@@ -537,11 +626,25 @@ export const CustomerVoiceView: React.FC = () => {
       };
       setSession(initialSession);
       playedSupervisorTurnsRef.current.clear();
+      lastKnownCallStatusRef.current = 'active';
+      isAnnouncingHandoffRef.current = false;
+
+      // Pre-fetch handoff announcements in background so they are ready instantly
+      api.getHandoffAnnouncement('takeover').then((res) => {
+        takeoverAnnouncementRef.current = res;
+      }).catch(() => {});
+      api.getHandoffAnnouncement('handback').then((res) => {
+        handbackAnnouncementRef.current = res;
+      }).catch(() => {});
 
       // 4. Connect to LiveKit Room for real-time bidirectional WebRTC audio with Supervisor
       if (tokenRes.token && tokenRes.livekit_url) {
         try {
           cleanupLivekit();
+          if (incomingAudioRef.current) {
+            incomingAudioRef.current.play().catch(() => {});
+          }
+
           const room = new Room({
             adaptiveStream: true,
             dynacast: true,
@@ -552,27 +655,46 @@ export const CustomerVoiceView: React.FC = () => {
             },
           });
 
+          room.on(RoomEvent.AudioPlaybackStatusChanged, () => {
+            setAudioBlocked(!room.canPlaybackAudio);
+          });
+
           room.on(RoomEvent.TrackSubscribed, (track: RemoteTrack, publication, participant: RemoteParticipant) => {
             if (track.kind === Track.Kind.Audio) {
-              const el = track.attach();
-              el.id = `livekit-remote-${participant.identity}`;
-              el.style.display = 'none';
-              document.body.appendChild(el);
-              remoteAudioElementsRef.current.push(el);
+              if (incomingAudioRef.current) {
+                track.attach(incomingAudioRef.current);
+                incomingAudioRef.current.play().catch(() => {
+                  room.startAudio().catch(() => {});
+                });
+              } else {
+                const el = track.attach();
+                document.body.appendChild(el);
+                remoteAudioElementsRef.current.push(el);
+              }
+              setSpeechStatusText('Live Supervisor is connected to audio stream');
             }
           });
 
           room.on(RoomEvent.TrackUnsubscribed, (track: RemoteTrack) => {
-            const attached = track.detach();
-            attached.forEach((el) => {
-              el.remove();
-              remoteAudioElementsRef.current = remoteAudioElementsRef.current.filter((item) => item !== el);
-            });
+            track.detach();
           });
 
           await room.connect(tokenRes.livekit_url, tokenRes.token);
+          await room.startAudio();
           await room.localParticipant.setMicrophoneEnabled(!isMutedRef.current);
           livekitRoomRef.current = room;
+
+          // Attach any remote tracks already published
+          room.remoteParticipants.forEach((participant) => {
+            participant.trackPublications.forEach((pub) => {
+              if (pub.track && pub.track.kind === Track.Kind.Audio) {
+                if (incomingAudioRef.current) {
+                  pub.track.attach(incomingAudioRef.current);
+                  incomingAudioRef.current.play().catch(() => {});
+                }
+              }
+            });
+          });
         } catch (lkErr) {
           console.warn('LiveKit WebRTC connect warning:', lkErr);
         }
@@ -949,6 +1071,41 @@ export const CustomerVoiceView: React.FC = () => {
           </div>
 
           {/* Controls: Mute & End Call */}
+          {audioBlocked && (
+            <button
+              onClick={async () => {
+                if (livekitRoomRef.current) {
+                  await livekitRoomRef.current.startAudio();
+                }
+                setAudioBlocked(false);
+              }}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '0.5rem',
+                padding: '0.6rem 1.2rem',
+                borderRadius: '8px',
+                background: 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)',
+                color: '#ffffff',
+                fontWeight: 700,
+                fontSize: '0.85rem',
+                border: 'none',
+                cursor: 'pointer',
+                boxShadow: '0 0 16px rgba(245, 158, 11, 0.45)',
+                marginBottom: '0.6rem',
+              }}
+            >
+              <Volume2 size={16} />
+              <span>🔊 Browser blocked sound • Click here to enable audio</span>
+            </button>
+          )}
+          <audio
+            ref={incomingAudioRef}
+            autoPlay
+            playsInline
+            style={{ position: 'fixed', bottom: 0, right: 0, width: '1px', height: '1px', opacity: 0.01, pointerEvents: 'none' }}
+          />
+
           <div style={{
             display: 'flex',
             alignItems: 'center',

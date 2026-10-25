@@ -107,3 +107,19 @@ async def test_supervisor_database_login(client: httpx.AsyncClient):
     assert data["token_type"] == "bearer"
     assert data["user"]["email"] == "sup_a@tenant-a.com"
 
+@pytest.mark.asyncio
+async def test_handoff_announcements_endpoint(client: httpx.AsyncClient):
+    # Test takeover announcement
+    takeover_resp = await client.get("/api/v1/voice/announcement?type=takeover")
+    assert takeover_resp.status_code == 200
+    takeover_data = takeover_resp.json()
+    assert takeover_data["announcement_type"] == "takeover"
+    assert "supervisor has joined" in takeover_data["text"]
+
+    # Test handback announcement
+    handback_resp = await client.get("/api/v1/voice/announcement?type=handback")
+    assert handback_resp.status_code == 200
+    handback_data = handback_resp.json()
+    assert handback_data["announcement_type"] == "handback"
+    assert "Epoxa AI, and I am back" in handback_data["text"]
+

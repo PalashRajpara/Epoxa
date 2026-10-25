@@ -107,6 +107,10 @@ class ApiClient {
     return this.request<{ greeting: string; audio_base64?: string }>(`/voice/greeting${q}`);
   }
 
+  async getHandoffAnnouncement(type: 'takeover' | 'handback'): Promise<{ announcement_type: string; text: string; audio_base64?: string }> {
+    return this.request<{ announcement_type: string; text: string; audio_base64?: string }>(`/voice/announcement?type=${type}`);
+  }
+
   async createVoiceToken(customerName?: string, customerPhone?: string): Promise<VoiceTokenResponse> {
     return this.request<VoiceTokenResponse>('/voice/token', {
       method: 'POST',

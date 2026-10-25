@@ -83,6 +83,17 @@ class VoiceService:
         call = await self.get_session(db, org_id=org_id, session_id=session_id)
         if call.status == "initiating":
             call = await voice_repo.update_status(db, session_id=session_id, status="active")
+
+        # When call is in human supervisor takeover, AI is strictly paused
+        if call.status == "supervisor_takeover":
+            await voice_repo.add_transcript_turn(
+                db, session_id=session_id, org_id=org_id, speaker="customer", content=user_speech
+            )
+            await voice_repo.add_event(
+                db, session_id=session_id, event_type="customer_speech", actor="customer", payload={"text": user_speech}
+            )
+            return ""
+
         return await orchestrator.handle_turn(
             db, org_id=org_id, session_id=session_id, user_speech=user_speech, customer_id=call.customer_id
         )

@@ -85,6 +85,13 @@ class HandoffService:
             actor="supervisor",
             payload={"supervisor_id": str(supervisor_id), "supervisor_name": supervisor_name}
         )
+        await voice_repo.add_transcript_turn(
+            db,
+            session_id=session_id,
+            org_id=org_id,
+            speaker="ai_agent",
+            content="[Announcement] A live customer support supervisor has joined the call. Epoxa AI is paused."
+        )
 
         # 4. Generate supervisor LiveKit room token
         token = livekit_service.generate_token(
@@ -130,6 +137,15 @@ class HandoffService:
             session_id=session_id,
             status="active",
             handoff_state="returned_to_ai"
+        )
+
+        # 2. Log event & transcript turn
+        await voice_repo.add_transcript_turn(
+            db,
+            session_id=session_id,
+            org_id=org_id,
+            speaker="ai_agent",
+            content="[Announcement] Epoxa AI has resumed call control and is ready to assist you."
         )
 
         # 2. Log event

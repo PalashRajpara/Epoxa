@@ -46,6 +46,34 @@ async def get_greeting(
 
     return GreetingResponse(greeting=text, audio_base64=audio_b64)
 
+class AnnouncementResponse(BaseModel):
+    announcement_type: str
+    text: str
+    audio_base64: Optional[str] = None
+
+_announcement_cache: dict[str, str] = {}
+
+@router.get("/announcement", response_model=AnnouncementResponse, summary="Get pre-synthesized handoff announcement audio")
+async def get_handoff_announcement(
+    type: str = Query(..., pattern="^(takeover|handback)$"),
+):
+    if type == "takeover":
+        text = "A live customer support supervisor has joined the call and will be speaking with you now. Please hold for just a moment."
+    else:
+        text = ". I am Epoxa AI, and I am back to assist you with anything else you need. How may I help?"
+
+    audio_b64 = _announcement_cache.get(type)
+    if not audio_b64:
+        try:
+            audio_bytes = await speech_service.synthesize_speech(text)
+            if audio_bytes and len(audio_bytes) > 200:
+                audio_b64 = base64.b64encode(audio_bytes).decode("utf-8")
+                _announcement_cache[type] = audio_b64
+        except Exception as e:
+            logger.warning("Announcement speech synthesis error", error=str(e))
+
+    return AnnouncementResponse(announcement_type=type, text=text, audio_base64=audio_b64)
+
 @router.post("/speak", summary="Synthesize speech audio via Deepgram Aura")
 async def synthesize_speech_endpoint(req: SpeechTurnRequest):
     audio_bytes = await speech_service.synthesize_speech(req.speech)
